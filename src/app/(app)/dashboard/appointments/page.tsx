@@ -1,16 +1,34 @@
-import { Calendar } from 'lucide-react'
-import { PageHeader } from '@/components/page-header'
-import { EmptyState } from '@/components/empty-state'
+import { listAppointments, listDoctors } from "@/features/appointments/actions"
+import { listPatients } from "@/features/patients/actions"
+import { requireRole } from "@/lib/supabase/profile"
+import AppointmentsList from "@/features/appointments/components/appointments-list"
 
-export default function AppointmentsPage() {
+export default async function AppointmentsPage() {
+  const profile = await requireRole("doctor", "staff")
+
+  const [appointmentsResult, patientsResult, doctorsResult] = await Promise.all([
+    listAppointments(),
+    listPatients(),
+    listDoctors(),
+  ])
+
+  const appointments = appointmentsResult.success ? appointmentsResult.data : []
+  const doctors      = doctorsResult.success      ? doctorsResult.data      : []
+
+  // Transform PatientListItem → PatientOption for the booking form
+  const patients = patientsResult.success
+    ? patientsResult.data.map((p) => ({
+        id:   p.id,
+        name: `${p.firstName} ${p.lastName}`,
+        mrn:  p.mrn,
+      }))
+    : []
+
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title="Appointments" />
-      <EmptyState
-        icon={Calendar}
-        title="Appointments feature coming soon"
-        description="This page will be built in the Appointments feature chat."
-      />
-    </div>
+    <AppointmentsList
+      appointments={appointments}
+      patients={patients}
+      doctors={doctors}
+    />
   )
 }
