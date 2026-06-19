@@ -214,13 +214,13 @@ export default function PatientProfile({
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="mt-6">
-        <TabsList className="w-full justify-start border-b border-border">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="medical-history">Medical History</TabsTrigger>
-          <TabsTrigger value="care-profile">Care Profile</TabsTrigger>
-          <TabsTrigger value="appointments">Appointments</TabsTrigger>
-          <TabsTrigger value="payments">Payments</TabsTrigger>
-        </TabsList>
+  <TabsList className="w-full justify-start overflow-x-auto border-b border-border">
+    <TabsTrigger value="overview" className="shrink-0">Overview</TabsTrigger>
+    <TabsTrigger value="medical-history" className="shrink-0">Medical History</TabsTrigger>
+    <TabsTrigger value="care-profile" className="shrink-0">Care Profile</TabsTrigger>
+    <TabsTrigger value="appointments" className="shrink-0">Appointments</TabsTrigger>
+    <TabsTrigger value="payments" className="shrink-0">Payments</TabsTrigger>
+  </TabsList>
 
         {/* Overview tab */}
         <TabsContent value="overview" className="mt-6">
