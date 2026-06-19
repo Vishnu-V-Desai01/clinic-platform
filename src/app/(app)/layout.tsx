@@ -22,7 +22,8 @@ export default async function AppLayout({
         <header className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
           <SidebarTrigger className="-ml-1" />
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
+        {/* overflow-y-auto + min-h-0 allow this flex child to scroll */}
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto min-h-0 p-4 md:p-6">
           {children}
         </div>
       </SidebarInset>
