@@ -91,7 +91,6 @@ function SectionHeader({
 }: { icon: React.ElementType; title: string; subtitle: string }) {
   return (
     <div className="flex items-start gap-3 border-b pb-4">
-      {/* FIXED: added dark mode variants for the icon bubble */}
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/30 dark:text-sky-400">
         <Icon className="size-4" />
       </span>
@@ -146,11 +145,9 @@ function ChipInput({
     <div className="flex flex-wrap items-center gap-2 rounded-md border border-input bg-transparent p-2 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-500">
       {values.map((v) => (
         <Badge key={v} variant="secondary"
-          /* FIXED: added dark mode chip colours */
           className="gap-1 rounded-md bg-sky-50 py-1 pl-2.5 pr-1.5 text-sky-700 hover:bg-sky-100 dark:bg-sky-950/30 dark:text-sky-400 dark:hover:bg-sky-950/50">
           {v}
           <button type="button" onClick={() => onRemove(v)} aria-label={`Remove ${v}`}
-            /* FIXED: added dark mode remove button colour */
             className="rounded-sm text-sky-600 hover:text-sky-900 dark:text-sky-400 dark:hover:text-sky-200">
             <X className="size-3.5" />
           </button>
@@ -195,7 +192,7 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
         ? await updatePatient(patient!.id, values)
         : await createPatient(values)
       if (!result.success) { setError(result.error); return }
-      router.push(`/patients/${result.data.id}`)
+      router.push(`/dashboard/patients/${result.data.id}`)
       router.refresh()
     })
   }
@@ -208,7 +205,7 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
         {/* Header */}
         <header className="mb-8">
           <nav className="mb-3 flex items-center gap-1 text-sm text-muted-foreground">
-            <button type="button" onClick={() => router.push("/patients")}
+            <button type="button" onClick={() => router.push("/dashboard/patients")}
               className="hover:text-foreground">
               Patients
             </button>
@@ -233,7 +230,6 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
           </div>
         </header>
 
-        {/* Server error banner — FIXED: dark mode colours */}
         {serverError && (
           <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
             {serverError}
@@ -242,7 +238,7 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
 
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
 
-          {/* ── Left column ───────────────────────────────────────── */}
+          {/* Left column */}
           <div className="flex flex-col gap-6">
 
             {/* Basic Information */}
@@ -315,7 +311,6 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
                   </div>
                 </div>
 
-                {/* MRN — edit mode only */}
                 {isEdit && (
                   <div className="flex flex-col gap-2">
                     <FieldLabel htmlFor="mrn">
@@ -372,7 +367,7 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
             </Card>
           </div>
 
-          {/* ── Right column ──────────────────────────────────────── */}
+          {/* Right column */}
           <div className="flex flex-col gap-6">
 
             {/* Contact Details */}

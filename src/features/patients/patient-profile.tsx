@@ -18,6 +18,19 @@ import { archivePatient } from "./actions"
 import { calculateAge, genderLabel, statusLabel } from "./types"
 import type { PatientRecord, PatientStatus } from "./types"
 
+import {
+  ENCOUNTER_STATUS_LABELS,
+  type Encounter,
+  type EncounterStatus,
+} from "@/features/medical-records/types"
+
+import {
+  durationLabel,
+  statusLabel as appointmentStatusLabel,
+  type AppointmentListItem,
+  type AppointmentStatus,
+} from "@/features/appointments/types"
+
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -39,13 +52,32 @@ function formatSince(iso: string): string {
   })
 }
 
-// FIXED: all three statuses now have proper dark mode variants
 const STATUS_BADGE: Record<PatientStatus, string> = {
   active:
     "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   inactive:
     "border-border bg-muted text-muted-foreground",
   archived:
+    "border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+}
+
+const ENCOUNTER_STATUS_BADGE: Record<EncounterStatus, string> = {
+  active:
+    "border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+  completed:
+    "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  cancelled:
+    "border-destructive/30 bg-destructive/10 text-destructive",
+}
+
+const APPOINTMENT_STATUS_BADGE: Record<AppointmentStatus, string> = {
+  scheduled:
+    "border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+  completed:
+    "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  cancelled:
+    "border-destructive/30 bg-destructive/10 text-destructive",
+  no_show:
     "border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 }
 
@@ -65,9 +97,15 @@ function EmptyState({ title, note }: { title: string; note?: string }) {
 
 interface PatientProfileProps {
   patient: PatientRecord
+  recentEncounters?: Encounter[]
+  recentAppointments?: AppointmentListItem[]
 }
 
-export default function PatientProfile({ patient }: PatientProfileProps) {
+export default function PatientProfile({
+  patient,
+  recentEncounters = [],
+  recentAppointments = [],
+}: PatientProfileProps) {
   const router                       = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -80,7 +118,7 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
     startTransition(async () => {
       const result = await archivePatient(patient.id)
       if (result.success) {
-        router.push("/patients")
+        router.push("/dashboard/patients")
         router.refresh()
       } else {
         alert(result.error)
@@ -102,7 +140,7 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
             {patient.patient_id_number ?? "—"}
           </p>
         </div>
-        <Button onClick={() => router.push(`/patients/${patient.id}/edit`)}>
+        <Button onClick={() => router.push(`/dashboard/patients/${patient.id}/edit`)}>
           <Pencil aria-hidden="true" /> Edit
         </Button>
       </header>
@@ -127,7 +165,7 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button variant="outline" size="sm"
-                  onClick={() => router.push(`/patients/${patient.id}/edit`)}>
+                  onClick={() => router.push(`/dashboard/patients/${patient.id}/edit`)}>
                   <Pencil /> Edit
                 </Button>
                 <Button variant="outline" size="sm"
@@ -188,7 +226,6 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
         <TabsContent value="overview" className="mt-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
 
-            {/* Emergency contact */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -219,7 +256,6 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
               </CardContent>
             </Card>
 
-            {/* Blood group & address */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -246,7 +282,6 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
               </CardContent>
             </Card>
 
-            {/* Medical status */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -256,7 +291,6 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
               <CardContent className="space-y-3 text-sm">
                 <div>
                   <p className="text-muted-foreground">Allergies</p>
-                  {/* FIXED: softer red in dark mode */}
                   <p className="font-medium text-red-600 dark:text-red-400">
                     {patient.allergies.length > 0
                       ? patient.allergies.join(", ")
@@ -276,7 +310,6 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
               </CardContent>
             </Card>
 
-            {/* Notes */}
             {patient.notes && (
               <Card className="md:col-span-2 lg:col-span-3">
                 <CardHeader>
@@ -294,21 +327,96 @@ export default function PatientProfile({ patient }: PatientProfileProps) {
           </div>
         </TabsContent>
 
+        {/* Medical History tab */}
         <TabsContent value="medical-history" className="mt-6">
-          <EmptyState title="Medical history coming soon"
-            note="Consultation notes, diagnoses, and test results will appear here." />
+          {recentEncounters.length === 0 ? (
+            <EmptyState
+              title="No medical records yet"
+              note="Consultation notes, diagnoses, and test results will appear here."
+            />
+          ) : (
+            <div className="space-y-3">
+              {recentEncounters.map((enc) => (
+                <Card
+                  key={enc.id}
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  onClick={() => router.push(`/dashboard/patients/${patient.id}/records/${enc.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      router.push(`/dashboard/patients/${patient.id}/records/${enc.id}`)
+                    }
+                  }}
+                >
+                  <CardContent className="flex items-center justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {enc.chief_complaint ?? "No chief complaint recorded"}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatDate(enc.encounter_date)}
+                      </p>
+                    </div>
+                    <Badge className={ENCOUNTER_STATUS_BADGE[enc.status]}>
+                      {ENCOUNTER_STATUS_LABELS[enc.status]}
+                    </Badge>
+                  </CardContent>
+                </Card>
+              ))}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push(`/dashboard/patients/${patient.id}/records`)}
+              >
+                View All Medical Records
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
+        {/* Care Profile tab — not yet built */}
         <TabsContent value="care-profile" className="mt-6">
           <EmptyState title="Care profile coming soon"
             note="Medicines, follow-ups, and care plan details will appear here." />
         </TabsContent>
 
+        {/* Appointments tab */}
         <TabsContent value="appointments" className="mt-6">
-          <EmptyState title="Appointments coming soon"
-            note="Full appointment history and scheduling will appear here." />
+          {recentAppointments.length === 0 ? (
+            <EmptyState
+              title="No appointments yet"
+              note="Scheduled, completed, and cancelled appointments will appear here."
+            />
+          ) : (
+            <div className="space-y-3">
+              {recentAppointments.map((apt) => (
+                <Card key={apt.id}>
+                  <CardContent className="flex items-center justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground">{apt.doctorName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {apt.appointmentDate} at {apt.appointmentTime}{" "}
+                        <span className="px-1">&bull;</span> {durationLabel(apt.durationMinutes)}
+                      </p>
+                      {apt.chiefComplaint && (
+                        <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                          {apt.chiefComplaint}
+                        </p>
+                      )}
+                    </div>
+                    <Badge className={APPOINTMENT_STATUS_BADGE[apt.status]}>
+                      {appointmentStatusLabel(apt.status)}
+                    </Badge>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
+        {/* Payments tab — not yet built */}
         <TabsContent value="payments" className="mt-6">
           <EmptyState title="Payments coming soon"
             note="Invoices, balances, and payment history will appear here." />

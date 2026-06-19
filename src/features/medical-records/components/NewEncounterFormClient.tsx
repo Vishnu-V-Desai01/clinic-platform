@@ -101,7 +101,7 @@ export default function NewEncounterFormClient({
       if ("error" in result) {
         setFormError(result.error)
       } else {
-        router.push(`/patients/${patientId}/records/${result.encounterId}`)
+        router.push(`/dashboard/patients/${patientId}/records/${result.encounterId}`)
       }
     })
   }
@@ -109,11 +109,9 @@ export default function NewEncounterFormClient({
   return (
     <div className="flex flex-col flex-1 min-h-0">
 
-      {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 pt-6 pb-4">
 
-          {/* Page header */}
           <div className="mb-6 flex items-start gap-3">
             <Button
               type="button"
@@ -122,7 +120,7 @@ export default function NewEncounterFormClient({
               className="mt-1 shrink-0"
               aria-label="Go back"
               disabled={isPending}
-              onClick={() => router.push(`/patients/${patientId}/records`)}
+              onClick={() => router.push(`/dashboard/patients/${patientId}/records`)}
             >
               <ArrowLeft className="size-5" />
             </Button>
@@ -138,7 +136,6 @@ export default function NewEncounterFormClient({
 
           <div className="flex flex-col gap-4">
 
-            {/* ── Consultation Notes ── */}
             <Card>
               <Accordion type="single" collapsible defaultValue="notes">
                 <AccordionItem value="notes" className="border-b-0">
@@ -183,8 +180,6 @@ export default function NewEncounterFormClient({
               </Accordion>
             </Card>
 
-            {/* ── 3-column clinical sections ── */}
-            {/* Each card: "Add" button always at top, items grow below */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
 
               {/* Diagnoses */}
@@ -200,8 +195,6 @@ export default function NewEncounterFormClient({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-
-                  {/* ↓ button always first — never moves */}
                   <Button
                     type="button"
                     variant="outline"
@@ -268,7 +261,6 @@ export default function NewEncounterFormClient({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-
                   <Button
                     type="button"
                     variant="outline"
@@ -329,7 +321,6 @@ export default function NewEncounterFormClient({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-
                   <Button
                     type="button"
                     variant="outline"
@@ -387,7 +378,6 @@ export default function NewEncounterFormClient({
         </div>
       </div>
 
-      {/* ── Dialogs ── */}
       <AddDiagnosisDialog
         open={dxOpen}
         onClose={() => setDxOpen(false)}
@@ -413,7 +403,6 @@ export default function NewEncounterFormClient({
         }}
       />
 
-      {/* ── Footer — shrink-0 always visible ── */}
       <div className="shrink-0 -mx-4 md:-mx-6 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           {formError ? (
@@ -431,7 +420,7 @@ export default function NewEncounterFormClient({
               type="button"
               variant="outline"
               disabled={isPending}
-              onClick={() => router.push(`/patients/${patientId}/records`)}
+              onClick={() => router.push(`/dashboard/patients/${patientId}/records`)}
             >
               Cancel
             </Button>

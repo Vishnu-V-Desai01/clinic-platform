@@ -31,7 +31,6 @@ function getInitials(firstName: string, lastName: string) {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
 }
 
-// Dark-mode-aware badge colours
 const STATUS_BADGE_CLASSES: Record<PatientStatus, string> = {
   active:
     "border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
@@ -96,7 +95,7 @@ export default function PatientsList({ patients }: PatientsListProps) {
           </p>
         </div>
         <Button
-          onClick={() => router.push("/patients/new")}
+          onClick={() => router.push("/dashboard/patients/new")}
           className="bg-sky-500 text-white hover:bg-sky-600"
         >
           <Plus className="size-4" />
@@ -204,7 +203,7 @@ export default function PatientsList({ patients }: PatientsListProps) {
                           variant="ghost"
                           size="sm"
                           className="h-8 text-sky-600 hover:bg-sky-50 hover:text-sky-700 dark:text-sky-400 dark:hover:bg-sky-950/30 dark:hover:text-sky-300"
-                          onClick={() => router.push(`/patients/${patient.id}`)}
+                          onClick={() => router.push(`/dashboard/patients/${patient.id}`)}
                         >
                           <Eye className="size-3.5" /> View
                         </Button>
@@ -212,7 +211,7 @@ export default function PatientsList({ patients }: PatientsListProps) {
                           variant="ghost"
                           size="sm"
                           className="h-8 text-sky-600 hover:bg-sky-50 hover:text-sky-700 dark:text-sky-400 dark:hover:bg-sky-950/30 dark:hover:text-sky-300"
-                          onClick={() => router.push(`/patients/${patient.id}/edit`)}
+                          onClick={() => router.push(`/dashboard/patients/${patient.id}/edit`)}
                         >
                           <Pencil className="size-3.5" /> Edit
                         </Button>
@@ -225,12 +224,12 @@ export default function PatientsList({ patients }: PatientsListProps) {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => router.push(`/patients/${patient.id}`)}
+                              onClick={() => router.push(`/dashboard/patients/${patient.id}`)}
                             >
                               <Eye className="size-4" /> View
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => router.push(`/patients/${patient.id}/edit`)}
+                              onClick={() => router.push(`/dashboard/patients/${patient.id}/edit`)}
                             >
                               <Pencil className="size-4" /> Edit
                             </DropdownMenuItem>

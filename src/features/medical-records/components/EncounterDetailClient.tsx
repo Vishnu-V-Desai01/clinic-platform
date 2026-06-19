@@ -50,9 +50,6 @@ import {
   updateTestResult,
 } from "../actions"
 
-// ---------------------------------------------------------------
-// DB status value → colour class
-// ---------------------------------------------------------------
 const STATUS_BADGE_CLASS: Record<string, string> = {
   active:    "bg-sky-500/15 text-sky-700 dark:text-sky-400",
   completed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
@@ -64,9 +61,6 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
   pending:   "bg-amber-500/15 text-amber-700 dark:text-amber-400",
 }
 
-// ---------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------
 function StatusBadge({ status, label }: { status: string; label: string }) {
   return (
     <Badge
@@ -98,8 +92,6 @@ function SectionHeader({
   )
 }
 
-// Converts DB observation_type to a display label.
-// Checks COMMON_OBSERVATION_TYPES first, then falls back to capitalise.
 function observationTypeLabel(type: string): string {
   const found = COMMON_OBSERVATION_TYPES.find((t) => t.value === type)
   if (found) return found.label
@@ -119,9 +111,6 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : dateFormatter.format(d)
 }
 
-// ---------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------
 interface EncounterDetailClientProps {
   encounter:  EncounterWithDetails
   patientId:  string
@@ -129,9 +118,6 @@ interface EncounterDetailClientProps {
   doctorName: string
 }
 
-// ---------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------
 export default function EncounterDetailClient({
   encounter,
   patientId,
@@ -144,9 +130,6 @@ export default function EncounterDetailClient({
 
   const isDoctor = userRole === "doctor"
 
-  // ---------------------------------------------------------------
-  // Action helpers
-  // ---------------------------------------------------------------
   function handleMarkCompleted() {
     setActionError(null)
     startTransition(async () => {
@@ -185,13 +168,9 @@ export default function EncounterDetailClient({
     })
   }
 
-  // ---------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
 
-      {/* Header */}
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <Button
@@ -199,7 +178,7 @@ export default function EncounterDetailClient({
             size="icon"
             className="size-9 shrink-0 rounded-full"
             aria-label="Go back to medical records"
-            onClick={() => router.push(`/patients/${patientId}/records`)}
+            onClick={() => router.push(`/dashboard/patients/${patientId}/records`)}
           >
             <ArrowLeft className="size-4" />
           </Button>
@@ -231,17 +210,14 @@ export default function EncounterDetailClient({
         </div>
       </header>
 
-      {/* Action error */}
       {actionError && (
         <div className="mb-4 rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {actionError}
         </div>
       )}
 
-      {/* Cards grid */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
 
-        {/* ── Notes ── */}
         <Card className="rounded-xl border shadow-sm">
           <SectionHeader icon={FileText} title="Notes" />
           <CardContent className="space-y-4">
@@ -272,7 +248,6 @@ export default function EncounterDetailClient({
           </CardContent>
         </Card>
 
-        {/* ── Diagnoses ── */}
         <Card className="rounded-xl border shadow-sm">
           <SectionHeader icon={Stethoscope} title="Diagnoses" />
           <CardContent>
@@ -335,7 +310,6 @@ export default function EncounterDetailClient({
           </CardContent>
         </Card>
 
-        {/* ── Vitals / Observations ── */}
         <Card className="rounded-xl border shadow-sm">
           <SectionHeader icon={Activity} title="Vitals" />
           <CardContent>
@@ -385,7 +359,6 @@ export default function EncounterDetailClient({
           </CardContent>
         </Card>
 
-        {/* ── Prescriptions ── */}
         <Card className="rounded-xl border shadow-sm">
           <SectionHeader icon={Pill} title="Prescriptions" />
           <CardContent>
@@ -452,7 +425,6 @@ export default function EncounterDetailClient({
           </CardContent>
         </Card>
 
-        {/* ── Test Results — full width ── */}
         <Card className="rounded-xl border shadow-sm lg:col-span-2">
           <SectionHeader icon={FlaskConical} title="Test Results" />
           <CardContent>
@@ -512,7 +484,6 @@ export default function EncounterDetailClient({
                           )}
                         </TableCell>
                         <TableCell>
-                          {/* Both doctor and staff can update test result status */}
                           <Select
                             value={tr.status}
                             disabled={isPending}

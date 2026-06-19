@@ -8,9 +8,6 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import type { Encounter } from "../types"
 
-// ---------------------------------------------------------------
-// DB status → display label + colour
-// ---------------------------------------------------------------
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   active: {
     label: "Active",
@@ -26,9 +23,6 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   },
 }
 
-// ---------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------
 const dateFormatter = new Intl.DateTimeFormat("en-IN", {
   day: "numeric",
   month: "short",
@@ -40,9 +34,6 @@ function formatDate(iso: string) {
   return Number.isNaN(d.getTime()) ? iso : dateFormatter.format(d)
 }
 
-// ---------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------
 function EncounterStatusBadge({ status }: { status: string }) {
   const config = STATUS_CONFIG[status] ?? {
     label: status,
@@ -77,9 +68,6 @@ function EmptyState() {
   )
 }
 
-// ---------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------
 interface EncounterListClientProps {
   patientId: string
   patientName: string
@@ -88,9 +76,6 @@ interface EncounterListClientProps {
   userRole: "doctor" | "staff"
 }
 
-// ---------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------
 export default function EncounterListClient({
   patientId,
   patientName,
@@ -102,7 +87,6 @@ export default function EncounterListClient({
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
-      {/* Header */}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <Button
@@ -111,7 +95,7 @@ export default function EncounterListClient({
             size="icon"
             className="size-9 shrink-0 rounded-full"
             aria-label="Go back to patient"
-            onClick={() => router.push(`/patients/${patientId}`)}
+            onClick={() => router.push(`/dashboard/patients/${patientId}`)}
           >
             <ArrowLeft className="size-4" aria-hidden="true" />
           </Button>
@@ -128,7 +112,7 @@ export default function EncounterListClient({
         {userRole === "doctor" && (
           <Button
             type="button"
-            onClick={() => router.push(`/patients/${patientId}/records/new`)}
+            onClick={() => router.push(`/dashboard/patients/${patientId}/records/new`)}
             className="shrink-0 self-start"
           >
             <Plus className="mr-2 size-4" aria-hidden="true" />
@@ -137,7 +121,6 @@ export default function EncounterListClient({
         )}
       </header>
 
-      {/* Timeline */}
       <section className="mt-8" aria-label="Encounter timeline">
         {encounters.length === 0 ? (
           <EmptyState />
@@ -148,25 +131,20 @@ export default function EncounterListClient({
                 key={encounter.id}
                 className="grid grid-cols-[1fr] sm:grid-cols-[7.5rem_1fr] sm:gap-x-5"
               >
-                {/* Date column — desktop */}
                 <div className="hidden pt-6 text-right text-sm font-medium text-muted-foreground sm:block">
                   {formatDate(encounter.encounter_date)}
                 </div>
 
-                {/* Rail + card */}
                 <div className="relative pb-5 pl-5 sm:pl-6">
-                  {/* Vertical rail line */}
                   <span
                     className="absolute left-0 top-0 h-full border-l border-border"
                     aria-hidden="true"
                   />
-                  {/* Rail dot */}
                   <span
                     className="absolute -left-[5px] top-6 size-2.5 rounded-full border-2 border-background bg-muted-foreground/60"
                     aria-hidden="true"
                   />
 
-                  {/* Date — mobile (above card) */}
                   <p className="mb-2 text-sm font-medium text-muted-foreground sm:hidden">
                     {formatDate(encounter.encounter_date)}
                   </p>
@@ -176,14 +154,14 @@ export default function EncounterListClient({
                     tabIndex={0}
                     onClick={() =>
                       router.push(
-                        `/patients/${patientId}/records/${encounter.id}`,
+                        `/dashboard/patients/${patientId}/records/${encounter.id}`,
                       )
                     }
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault()
                         router.push(
-                          `/patients/${patientId}/records/${encounter.id}`,
+                          `/dashboard/patients/${patientId}/records/${encounter.id}`,
                         )
                       }
                     }}
@@ -201,7 +179,6 @@ export default function EncounterListClient({
                       <EncounterStatusBadge status={encounter.status} />
                     </div>
 
-                    {/* Notes preview */}
                     {encounter.notes && (
                       <p className="mt-1.5 line-clamp-1 text-sm text-muted-foreground">
                         {encounter.notes}
