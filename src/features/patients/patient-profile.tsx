@@ -31,6 +31,8 @@ import {
   type AppointmentStatus,
 } from "@/features/appointments/types"
 
+import { CarePlanView } from "@/features/care-plans/components/care-plan-view"
+
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -376,10 +378,9 @@ export default function PatientProfile({
           )}
         </TabsContent>
 
-        {/* Care Profile tab — not yet built */}
+        {/* Care Profile tab — integrated with CarePlanView */}
         <TabsContent value="care-profile" className="mt-6">
-          <EmptyState title="Care profile coming soon"
-            note="Medicines, follow-ups, and care plan details will appear here." />
+          <CarePlanView patientId={patient.id} />
         </TabsContent>
 
         {/* Appointments tab */}
