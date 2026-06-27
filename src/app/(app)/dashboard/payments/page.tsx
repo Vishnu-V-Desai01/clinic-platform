@@ -1,16 +1,32 @@
-import { Receipt } from 'lucide-react'
-import { PageHeader } from '@/components/page-header'
-import { EmptyState } from '@/components/empty-state'
+// src/app/(app)/dashboard/payments/page.tsx
 
-export default function PaymentsPage() {
+export const dynamic = 'force-dynamic';
+
+import { getOrCreateProfile } from '@/lib/supabase/profile';
+import {
+  getPaymentsDashboardData,
+  getApprovedOutstandingCharges,
+  getActivePatientsForCharge,
+} from '@/features/payments/actions';
+import PaymentsDashboardClient from '@/features/payments/components/payments-dashboard-client';
+
+export default async function PaymentsPage() {
+  const profile = await getOrCreateProfile();
+
+  const [{ payments, metrics, byMode }, approvedCharges, patients] = await Promise.all([
+    getPaymentsDashboardData(),
+    getApprovedOutstandingCharges(),
+    getActivePatientsForCharge(),
+  ]);
+
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title="Payments" />
-      <EmptyState
-        icon={Receipt}
-        title="Payments feature coming soon"
-        description="This page will be built in the Payments feature chat."
-      />
-    </div>
-  )
+    <PaymentsDashboardClient
+      payments={payments}
+      metrics={metrics}
+      byMode={byMode}
+      approvedCharges={approvedCharges}
+      patients={patients}
+      userRole={(profile?.role as 'doctor' | 'staff' | 'patient') || 'patient'}
+    />
+  );
 }

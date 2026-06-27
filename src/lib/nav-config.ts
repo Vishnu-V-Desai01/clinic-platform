@@ -5,6 +5,7 @@ import {
   Calendar,
   Receipt,
   MessageSquare,
+  ClipboardCheck,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/profile'
 
@@ -12,7 +13,6 @@ export type NavItem = {
   title: string
   href: string
   icon: LucideIcon
-  // Populated by the future messaging chat. Leave undefined for now.
   badgeCount?: number
 }
 
@@ -22,6 +22,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Patients', href: '/dashboard/patients', icon: Users },
     { title: 'Appointments', href: '/dashboard/appointments', icon: Calendar },
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
+    { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   ],
   staff: [
@@ -29,12 +30,12 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Patients', href: '/dashboard/patients', icon: Users },
     { title: 'Appointments', href: '/dashboard/appointments', icon: Calendar },
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
+    { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   ],
   patient: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { title: 'My appointments', href: '/dashboard/appointments', icon: Calendar },
-    { title: 'My payments', href: '/dashboard/payments', icon: Receipt },
+    { title: 'My Appointments', href: '/dashboard/appointments', icon: Calendar },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   ],
 }
