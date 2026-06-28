@@ -1,6 +1,6 @@
 // src/features/payments/document-generator.ts
 
-import PDFDocument from 'pdfkit';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
 
@@ -24,7 +24,7 @@ export async function generatePaymentReceipt(paymentId: string): Promise<Buffer 
       `
       *,
       patients (first_name, last_name, patient_id_number),
-      appointments (appointment_datetime, appointment_type),
+      appointments (appointment_date),
       profiles!created_by (full_name),
       payment_collections (
         id,
@@ -45,96 +45,116 @@ export async function generatePaymentReceipt(paymentId: string): Promise<Buffer 
   }
 
   try {
-    const doc = new PDFDocument();
-    const buffers: Buffer[] = [];
+    const pdfDoc = await PDFDocument.create();
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontReg = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    doc.on('data', (chunk) => buffers.push(chunk));
+    const page = pdfDoc.addPage([595, 842]);
+    const { width, height } = page.getSize();
+    const margin = 50;
+    let y = height - margin;
 
-    const appointmentDate = payment.appointments?.appointment_datetime
-      ? new Date(payment.appointments.appointment_datetime).toLocaleDateString('en-IN')
-      : 'N/A';
+    const black = rgb(0, 0, 0);
+    const gray = rgb(0.5, 0.5, 0.5);
+    const red = rgb(0.8, 0, 0);
+    const green = rgb(0.09, 0.64, 0.09);
 
-    const serviceLabel =
-      payment.appointments?.appointment_type ||
-      payment.description ||
-      'Charge';
+    const drawText = (
+      text: string,
+      opts: {
+        font?: typeof fontBold;
+        size?: number;
+        color?: ReturnType<typeof rgb>;
+        indent?: number;
+      } = {}
+    ) => {
+      const { font = fontReg, size = 10, color = black, indent = 0 } = opts;
+      const maxChars = 90;
+      const display = text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
+      page.drawText(display, { x: margin + indent, y, size, font, color });
+      y -= size + 6;
+    };
+
+    const drawLine = (color = rgb(0.8, 0.8, 0.8)) => {
+      page.drawLine({
+        start: { x: margin, y },
+        end: { x: width - margin, y },
+        thickness: 0.5,
+        color,
+      });
+      y -= 8;
+    };
+
+    const formatAmt = (v: number) =>
+      'Rs. ' + Number(v).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    const patientName = patientFullName(payment.patients);
+    const appointmentDate = payment.appointments?.appointment_date
+      ? new Date(payment.appointments.appointment_date).toLocaleDateString('en-IN')
+      : null;
 
     // Header
-    doc.fontSize(20).font('Helvetica-Bold').text('Payment Receipt', { align: 'center' });
-    doc.moveDown();
+    const title = 'Payment Receipt';
+    const titleWidth = fontBold.widthOfTextAtSize(title, 20);
+    page.drawText(title, { x: (width - titleWidth) / 2, y, size: 20, font: fontBold, color: black });
+    y -= 28;
+    const sub = 'Generated: ' + new Date().toLocaleString('en-IN');
+    const subWidth = fontReg.widthOfTextAtSize(sub, 9);
+    page.drawText(sub, { x: (width - subWidth) / 2, y, size: 9, font: fontReg, color: gray });
+    y -= 20;
+    drawLine(rgb(0.7, 0.7, 0.7));
+    y -= 4;
 
-    // Receipt details
-    doc.fontSize(12).font('Helvetica');
-    doc.text(`Receipt Date: ${new Date().toLocaleDateString('en-IN')}`);
-    doc.text(`Payment ID: ${paymentId}`);
-    doc.moveDown();
+    drawText('Payment ID: ' + paymentId);
+    drawText('Receipt Date: ' + new Date().toLocaleDateString('en-IN'));
+    y -= 6;
 
-    // Patient Information
-    doc.fontSize(14).font('Helvetica-Bold').text('Patient Information');
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Name: ${patientFullName(payment.patients)}`);
-    doc.text(`MRN: ${payment.patients?.patient_id_number || 'N/A'}`);
-    doc.moveDown();
+    drawText('Patient Information', { font: fontBold, size: 12 });
+    drawLine();
+    drawText('Name:  ' + patientName);
+    drawText('MRN:   ' + (payment.patients?.patient_id_number || 'N/A'));
+    y -= 6;
 
-    // Appointment / Charge Details
-    doc.fontSize(14).font('Helvetica-Bold').text('Charge Details');
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Service: ${serviceLabel}`);
-    doc.text(`Date: ${appointmentDate}`);
-    doc.text(`Doctor: ${payment.profiles?.full_name || 'N/A'}`);
-    doc.moveDown();
+    drawText('Charge Details', { font: fontBold, size: 12 });
+    drawLine();
+    drawText('Service: ' + (payment.description || 'Consultation'));
+    if (appointmentDate) drawText('Date:    ' + appointmentDate);
+    drawText('Doctor:  ' + (payment.profiles?.full_name || 'N/A'));
+    y -= 6;
 
-    // Payment Summary
-    doc.fontSize(14).font('Helvetica-Bold').text('Payment Summary');
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Amount Charged: Rs.${payment.amount_charged.toFixed(2)}`);
-    doc.text(`Amount Paid: Rs.${payment.amount_paid.toFixed(2)}`);
-    doc.fillColor(payment.outstanding_balance > 0 ? 'red' : 'black');
-    doc.text(`Outstanding Balance: Rs.${payment.outstanding_balance.toFixed(2)}`);
-    doc.fillColor('black');
-    doc.moveDown();
+    drawText('Payment Summary', { font: fontBold, size: 12 });
+    drawLine();
+    drawText('Amount Charged:  ' + formatAmt(payment.amount_charged));
+    drawText('Amount Paid:     ' + formatAmt(payment.amount_paid));
+    if (payment.outstanding_balance > 0) {
+      drawText('Outstanding:     ' + formatAmt(payment.outstanding_balance), { color: red });
+    } else {
+      drawText('Outstanding:     Rs. 0.00  (Fully Paid)', { color: green });
+    }
+    y -= 6;
 
-    // Collection History
-    const collections = payment.payment_collections || [];
+    const collections: any[] = payment.payment_collections || [];
     if (collections.length > 0) {
-      doc.fontSize(14).font('Helvetica-Bold').text('Collection History');
-      doc.fontSize(10).font('Helvetica');
-
-      const col1X = 50;
-      const col2X = 200;
-      const col3X = 350;
-
-      doc.font('Helvetica-Bold');
-      doc.text('Date', col1X, doc.y, { width: 150 });
-      doc.text('Method', col2X, doc.y - 12, { width: 150 });
-      doc.text('Amount', col3X, doc.y - 12, { width: 100 });
-      doc.moveDown();
-
-      doc.font('Helvetica');
-      collections.forEach((col: any) => {
-        const collectionDate = new Date(col.collection_date).toLocaleDateString('en-IN');
-        const y = doc.y;
-        doc.text(collectionDate, col1X, y, { width: 150 });
-        doc.text(col.payment_method, col2X, y, { width: 150 });
-        doc.text(`Rs.${col.amount_collected.toFixed(2)}`, col3X, y, { width: 100 });
-        doc.moveDown();
+      drawText('Collection History', { font: fontBold, size: 12 });
+      drawLine();
+      collections.forEach((col: any, idx: number) => {
+        const colDate = new Date(col.collection_date).toLocaleDateString('en-IN');
+        const ref = col.transaction_reference ? '  UTR: ' + col.transaction_reference : '';
+        drawText(idx + 1 + '.  ' + colDate + '  -  ' + col.payment_method.toUpperCase() + '  -  ' + formatAmt(col.amount_collected) + ref);
       });
+      y -= 6;
     }
 
-    doc.moveDown();
-    doc.fontSize(9).fillColor('#666');
-    doc.text('This is an automatically generated receipt.');
-    doc.text(`Generated on: ${new Date().toLocaleString('en-IN')}`);
+    drawLine(rgb(0.7, 0.7, 0.7));
+    const footer = 'This is a computer-generated receipt. No signature required.';
+    const footerWidth = fontReg.widthOfTextAtSize(footer, 9);
+    page.drawText(footer, { x: (width - footerWidth) / 2, y, size: 9, font: fontReg, color: gray });
 
-    doc.end();
-
-    return new Promise((resolve) => {
-      doc.on('end', () => resolve(Buffer.concat(buffers)));
-      doc.on('error', (err) => {
-        console.error('[generatePaymentReceipt] PDF error:', err);
-        resolve(null);
-      });
-    });
+    const pdfBytes = await pdfDoc.save();
+    return Buffer.from(pdfBytes);
   } catch (error) {
     console.error('[generatePaymentReceipt] Error:', error);
     return null;
@@ -142,7 +162,7 @@ export async function generatePaymentReceipt(paymentId: string): Promise<Buffer 
 }
 
 /**
- * Generate a treatment details document (summary of care plan + medical records).
+ * Generate a treatment details document.
  * Returns a Promise<Buffer>.
  */
 export async function generateTreatmentDetailsDocument(
@@ -167,7 +187,7 @@ export async function generateTreatmentDetailsDocument(
         conditions,
         notes
       ),
-      appointments (appointment_datetime, appointment_type)
+      appointments (appointment_date)
     `
     )
     .eq('id', paymentId)
@@ -185,12 +205,12 @@ export async function generateTreatmentDetailsDocument(
       `
       *,
       diagnoses (diagnosis_code, diagnosis_name),
-      prescriptions (medication_name, dosage, frequency, duration_days),
-      test_results (test_name, result_value, result_unit)
+      prescriptions (medication_name, dosage, frequency, duration_days)
     `
     )
     .eq('patient_id', payment.patient_id)
     .eq('clinic_id', profile.clinic_id)
+    .is('deleted_at', null)
     .order('encounter_date', { ascending: false })
     .limit(5);
 
@@ -202,91 +222,115 @@ export async function generateTreatmentDetailsDocument(
     .single();
 
   try {
-    const doc = new PDFDocument();
-    const buffers: Buffer[] = [];
+    const pdfDoc = await PDFDocument.create();
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontReg = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    doc.on('data', (chunk) => buffers.push(chunk));
+    const page = pdfDoc.addPage([595, 842]);
+    const { width, height } = page.getSize();
+    const margin = 50;
+    let y = height - margin;
+
+    const black = rgb(0, 0, 0);
+    const gray = rgb(0.5, 0.5, 0.5);
+
+    const drawText = (
+      text: string,
+      opts: {
+        font?: typeof fontBold;
+        size?: number;
+        color?: ReturnType<typeof rgb>;
+        indent?: number;
+      } = {}
+    ) => {
+      const { font = fontReg, size = 10, color = black, indent = 0 } = opts;
+      const maxChars = 90;
+      const display = text.length > maxChars ? text.slice(0, maxChars) + '...' : text;
+      page.drawText(display, { x: margin + indent, y, size, font, color });
+      y -= size + 6;
+    };
+
+    const drawLine = (color = rgb(0.8, 0.8, 0.8)) => {
+      page.drawLine({
+        start: { x: margin, y },
+        end: { x: width - margin, y },
+        thickness: 0.5,
+        color,
+      });
+      y -= 8;
+    };
+
+    const patientName = patientFullName(payment.patients);
 
     // Header
-    doc.fontSize(20).font('Helvetica-Bold').text('Treatment Details Document', { align: 'center' });
-    doc.moveDown();
+    const title = 'Treatment Details';
+    const titleWidth = fontBold.widthOfTextAtSize(title, 20);
+    page.drawText(title, { x: (width - titleWidth) / 2, y, size: 20, font: fontBold, color: black });
+    y -= 28;
+    const sub = 'Generated: ' + new Date().toLocaleString('en-IN');
+    const subWidth = fontReg.widthOfTextAtSize(sub, 9);
+    page.drawText(sub, { x: (width - subWidth) / 2, y, size: 9, font: fontReg, color: gray });
+    y -= 20;
+    drawLine(rgb(0.7, 0.7, 0.7));
+    y -= 4;
 
-    // Patient Info
-    doc.fontSize(14).font('Helvetica-Bold').text('Patient Information');
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Name: ${patientFullName(payment.patients)}`);
-    doc.text(`MRN: ${payment.patients?.patient_id_number || 'N/A'}`);
-    doc.text(`Blood Group: ${payment.patients?.blood_group || 'N/A'}`);
+    drawText('Patient Information', { font: fontBold, size: 12 });
+    drawLine();
+    drawText('Name:        ' + patientName);
+    drawText('MRN:         ' + (payment.patients?.patient_id_number || 'N/A'));
+    drawText('Blood Group: ' + (payment.patients?.blood_group || 'N/A'));
 
-    if (payment.patients?.allergies?.length > 0) {
-      doc.text(`Allergies: ${payment.patients.allergies.join(', ')}`);
-    }
+    const allergies: string[] = payment.patients?.allergies || [];
+    const conditions: string[] = payment.patients?.conditions || [];
+    if (allergies.length > 0) drawText('Allergies:   ' + allergies.join(', '));
+    if (conditions.length > 0) drawText('Conditions:  ' + conditions.join(', '));
+    if (payment.patients?.notes) drawText('Notes:       ' + payment.patients.notes);
+    y -= 6;
 
-    if (payment.patients?.conditions?.length > 0) {
-      doc.text(`Conditions: ${payment.patients.conditions.join(', ')}`);
-    }
-
-    if (payment.patients?.notes) {
-      doc.text(`Notes: ${payment.patients.notes}`);
-    }
-    doc.moveDown();
-
-    // Care Plan
     if (carePlan) {
-      doc.fontSize(14).font('Helvetica-Bold').text('Current Care Plan');
-      doc.fontSize(11).font('Helvetica');
-      if (carePlan.plan_name) doc.text(`Plan: ${carePlan.plan_name}`);
-      if (carePlan.medications) {
-        doc.text(`Medications: ${carePlan.medications.join(', ')}`);
-      }
-      if (carePlan.follow_up_instructions) {
-        doc.text(`Follow-up: ${carePlan.follow_up_instructions}`);
-      }
-      doc.moveDown();
+      drawText('Current Care Plan', { font: fontBold, size: 12 });
+      drawLine();
+      if (carePlan.plan_name) drawText('Plan: ' + carePlan.plan_name);
+      if (carePlan.medications) drawText('Medications: ' + carePlan.medications.join(', '));
+      if (carePlan.follow_up_instructions) drawText('Follow-up: ' + carePlan.follow_up_instructions);
+      y -= 6;
     }
 
-    // Recent Encounters
-    if (encounters && encounters.length > 0) {
-      doc.fontSize(14).font('Helvetica-Bold').text('Recent Encounters');
-      doc.fontSize(10).font('Helvetica');
+    drawText('Recent Encounters', { font: fontBold, size: 12 });
+    drawLine();
 
+    if (!encounters || encounters.length === 0) {
+      drawText('No encounter history found.', { color: gray });
+    } else {
       encounters.forEach((enc: any) => {
+        if (y < 100) {
+          y = pdfDoc.addPage([595, 842]).getSize().height - margin;
+        }
         const encDate = new Date(enc.encounter_date).toLocaleDateString('en-IN');
-        doc.font('Helvetica-Bold').text(`${encDate} - ${enc.encounter_type}`);
-        doc.font('Helvetica');
-
-        if (enc.diagnoses?.length > 0) {
-          const names = enc.diagnoses.map((d: any) => d.diagnosis_name).join(', ');
-          doc.text(`Diagnoses: ${names}`);
+        drawText(encDate + '  -  ' + (enc.encounter_type || 'Consultation'), { font: fontBold });
+        if (enc.chief_complaint) drawText('Chief Complaint: ' + enc.chief_complaint, { indent: 12 });
+        if (enc.diagnoses && enc.diagnoses.length > 0) {
+          const names = enc.diagnoses.map((d: any) => d.diagnosis_name).filter(Boolean).join(', ');
+          if (names) drawText('Diagnoses: ' + names, { indent: 12 });
         }
-
-        if (enc.prescriptions?.length > 0) {
-          const meds = enc.prescriptions.map((p: any) => p.medication_name).join(', ');
-          doc.text(`Medications: ${meds}`);
+        if (enc.prescriptions && enc.prescriptions.length > 0) {
+          const meds = enc.prescriptions
+            .map((p: any) => [p.medication_name, p.dosage, p.frequency].filter(Boolean).join(' '))
+            .join(';  ');
+          if (meds) drawText('Medications: ' + meds, { indent: 12 });
         }
-
-        if (enc.observation_notes) {
-          doc.text(`Notes: ${enc.observation_notes}`);
-        }
-
-        doc.moveDown(0.5);
+        if (enc.observation_notes) drawText('Notes: ' + enc.observation_notes, { indent: 12 });
+        y -= 4;
       });
     }
 
-    doc.moveDown();
-    doc.fontSize(9).fillColor('#666');
-    doc.text('This document is part of the patient medical record.');
-    doc.text(`Generated on: ${new Date().toLocaleString('en-IN')}`);
+    drawLine(rgb(0.7, 0.7, 0.7));
+    const footer = 'This is a computer-generated treatment summary.';
+    const footerWidth = fontReg.widthOfTextAtSize(footer, 9);
+    page.drawText(footer, { x: (width - footerWidth) / 2, y, size: 9, font: fontReg, color: gray });
 
-    doc.end();
-
-    return new Promise((resolve) => {
-      doc.on('end', () => resolve(Buffer.concat(buffers)));
-      doc.on('error', (err) => {
-        console.error('[generateTreatmentDetailsDocument] PDF error:', err);
-        resolve(null);
-      });
-    });
+    const pdfBytes = await pdfDoc.save();
+    return Buffer.from(pdfBytes);
   } catch (error) {
     console.error('[generateTreatmentDetailsDocument] Error:', error);
     return null;

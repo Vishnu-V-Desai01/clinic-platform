@@ -12,6 +12,9 @@ import {
   UpdatePaymentAmountSchema,
   SetAmountAndApprovePaymentSchema,
   CreateManualChargeSchema,
+  AddLineItemSchema,
+  UpdateLineItemSchema,
+  RemoveLineItemSchema,
 } from './schema';
 import type {
   PaymentCollection,
@@ -24,6 +27,7 @@ import type {
   PaymentDashboardMetrics,
   PaymentDashboardByMode,
   PatientPickerItem,
+  PaymentLineItem,
 } from './types';
 import { generateAndStorePaymentDocuments } from './document-storage';
 import type { z } from 'zod';
@@ -40,6 +44,15 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 function patientFullName(row: any): string {
   return `${row?.first_name || ''} ${row?.last_name || ''}`.trim() || 'Unknown';
 }
+
+// Compute a summary description from line items
+function descriptionFromLineItems(items: Array<{ description: string }>): string {
+  if (items.length === 0) return 'Charge';
+  if (items.length === 1) return items[0].description;
+  return items[0].description + ' (and ' + (items.length - 1) + ' more)';
+}
+
+// ── Read functions ────────────────────────────────────────────────────────────
 
 export async function getPaymentWithCollections(
   paymentId: string
@@ -63,6 +76,30 @@ export async function getPaymentWithCollections(
   }
 
   return data as PaymentWithCollections;
+}
+
+export async function getPaymentLineItems(
+  paymentId: string
+): Promise<PaymentLineItem[]> {
+  const supabase = createServerSupabaseClient();
+  const profile = await getOrCreateProfile();
+  if (!profile) return [];
+
+  await requireRole('doctor', 'staff');
+
+  const { data, error } = await supabase
+    .from('payment_line_items')
+    .select('*')
+    .eq('payment_id', paymentId)
+    .eq('clinic_id', profile.clinic_id)
+    .order('sort_order', { ascending: true });
+
+  if (error) {
+    console.error('[getPaymentLineItems]', error);
+    return [];
+  }
+
+  return (data || []) as PaymentLineItem[];
 }
 
 export async function listPayments(filters?: {
@@ -144,7 +181,8 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
       description,
       created_at,
       patients (first_name, last_name, patient_id_number),
-      appointments (appointment_date)
+      appointments (appointment_date),
+      payment_line_items (id, description, quantity, unit_price, total_price, sort_order)
     `
     )
     .eq('clinic_id', profile.clinic_id)
@@ -156,14 +194,21 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
     return [];
   }
 
-  return (data || []).map((row: any) => ({
-    id: row.id,
-    patientName: patientFullName(row.patients),
-    patientMrn: row.patients?.patient_id_number || 'N/A',
-    service: row.description || 'Charge',
-    date: row.appointments?.appointment_date || row.created_at,
-    proposedAmountPaise: Math.round((row.amount_charged || 0) * 100),
-  }));
+  return (data || []).map((row: any) => {
+    const lineItems = (row.payment_line_items || []).sort(
+      (a: any, b: any) => a.sort_order - b.sort_order
+    );
+    return {
+      id: row.id,
+      patientName: patientFullName(row.patients),
+      patientMrn: row.patients?.patient_id_number || 'N/A',
+      service: row.description || 'Charge',
+      date: row.appointments?.appointment_date || row.created_at,
+      proposedAmountPaise: Math.round((row.amount_charged || 0) * 100),
+      hasLineItems: lineItems.length > 0,
+      lineItems,
+    };
+  });
 }
 
 export async function getApprovedOutstandingCharges(): Promise<ApprovedChargeView[]> {
@@ -266,7 +311,6 @@ export async function getPaymentsDashboardData(): Promise<{
       created_at,
       patients (first_name, last_name, patient_id_number),
       appointments (appointment_date),
-      documents (document_type),
       payment_collections (amount_collected, payment_method, collection_date)
     `
     )
@@ -326,9 +370,7 @@ export async function getPaymentsDashboardData(): Promise<{
       }
     });
 
-    const hasReceipt = (row.documents || []).some(
-      (d: any) => d.document_type === 'receipt'
-    );
+    const hasReceipt = row.approval_status === 'approved';
 
     return {
       id: row.id,
@@ -364,6 +406,209 @@ export async function getPaymentsDashboardData(): Promise<{
   };
 }
 
+// ── Line item mutations ───────────────────────────────────────────────────────
+
+export async function addPaymentLineItem(
+  input: z.infer<typeof AddLineItemSchema>
+) {
+  try {
+    const supabase = createServerSupabaseClient();
+    const profile = await getOrCreateProfile();
+    if (!profile) return { success: false, error: 'Profile not found' };
+
+    await requireRole('doctor', 'staff');
+
+    const v = AddLineItemSchema.parse(input);
+
+    // Verify payment belongs to this clinic
+    const { data: payment, error: fetchError } = await supabase
+      .from('payments')
+      .select('id, amount_paid, approval_status')
+      .eq('id', v.payment_id)
+      .eq('clinic_id', profile.clinic_id)
+      .single();
+
+    if (fetchError || !payment) return { success: false, error: 'Payment not found' };
+
+    const { error } = await supabase.from('payment_line_items').insert({
+      clinic_id: profile.clinic_id,
+      payment_id: v.payment_id,
+      description: v.description,
+      quantity: v.quantity,
+      unit_price: v.unit_price,
+      sort_order: v.sort_order,
+    });
+
+    if (error) {
+      console.error('[addPaymentLineItem]', error);
+      return { success: false, error: error.message };
+    }
+
+    // Update summary description on the payment
+    const { data: allItems } = await supabase
+      .from('payment_line_items')
+      .select('description')
+      .eq('payment_id', v.payment_id)
+      .order('sort_order');
+
+    const newDescription = descriptionFromLineItems(allItems || []);
+    await supabase
+      .from('payments')
+      .update({ description: newDescription })
+      .eq('id', v.payment_id)
+      .eq('clinic_id', profile.clinic_id);
+
+    revalidatePath('/dashboard/payments');
+    revalidatePath('/dashboard/payments/approvals');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[addPaymentLineItem] Unexpected error:', err);
+    return { success: false, error: err?.message || 'Unexpected error' };
+  }
+}
+
+export async function updatePaymentLineItem(
+  input: z.infer<typeof UpdateLineItemSchema>
+) {
+  try {
+    const supabase = createServerSupabaseClient();
+    const profile = await getOrCreateProfile();
+    if (!profile) return { success: false, error: 'Profile not found' };
+
+    await requireRole('doctor', 'staff');
+
+    const v = UpdateLineItemSchema.parse(input);
+
+    // Verify the line item and parent payment
+    const { data: item, error: itemError } = await supabase
+      .from('payment_line_items')
+      .select('*, payments (amount_paid, amount_charged)')
+      .eq('id', v.id)
+      .eq('clinic_id', profile.clinic_id)
+      .single();
+
+    if (itemError || !item) return { success: false, error: 'Line item not found' };
+
+    // Validate: new total >= amount_paid
+    const payment: any = item.payments;
+    const newItemTotal = v.quantity * v.unit_price;
+    const otherItemsTotal = (payment.amount_charged || 0) - (item.total_price || 0);
+    const newTotal = otherItemsTotal + newItemTotal;
+
+    if (newTotal < (payment.amount_paid || 0)) {
+      return {
+        success: false,
+        error: `Cannot reduce bill below amount already paid (Rs. ${payment.amount_paid.toFixed(2)})`,
+      };
+    }
+
+    const { error } = await supabase
+      .from('payment_line_items')
+      .update({
+        description: v.description,
+        quantity: v.quantity,
+        unit_price: v.unit_price,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', v.id)
+      .eq('clinic_id', profile.clinic_id);
+
+    if (error) {
+      console.error('[updatePaymentLineItem]', error);
+      return { success: false, error: error.message };
+    }
+
+    // Refresh summary description
+    const { data: allItems } = await supabase
+      .from('payment_line_items')
+      .select('description')
+      .eq('payment_id', v.payment_id)
+      .order('sort_order');
+
+    const newDescription = descriptionFromLineItems(allItems || []);
+    await supabase
+      .from('payments')
+      .update({ description: newDescription })
+      .eq('id', v.payment_id)
+      .eq('clinic_id', profile.clinic_id);
+
+    revalidatePath('/dashboard/payments');
+    revalidatePath('/dashboard/payments/approvals');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[updatePaymentLineItem] Unexpected error:', err);
+    return { success: false, error: err?.message || 'Unexpected error' };
+  }
+}
+
+export async function removePaymentLineItem(
+  input: z.infer<typeof RemoveLineItemSchema>
+) {
+  try {
+    const supabase = createServerSupabaseClient();
+    const profile = await getOrCreateProfile();
+    if (!profile) return { success: false, error: 'Profile not found' };
+
+    await requireRole('doctor', 'staff');
+
+    const v = RemoveLineItemSchema.parse(input);
+
+    // Fetch item + parent payment for validation
+    const { data: item, error: itemError } = await supabase
+      .from('payment_line_items')
+      .select('*, payments (amount_paid, amount_charged)')
+      .eq('id', v.id)
+      .eq('clinic_id', profile.clinic_id)
+      .single();
+
+    if (itemError || !item) return { success: false, error: 'Line item not found' };
+
+    const payment: any = item.payments;
+    const newTotal = (payment.amount_charged || 0) - (item.total_price || 0);
+
+    if (newTotal < (payment.amount_paid || 0)) {
+      return {
+        success: false,
+        error: `Cannot remove this item — total would be less than amount already paid (Rs. ${payment.amount_paid.toFixed(2)})`,
+      };
+    }
+
+    const { error } = await supabase
+      .from('payment_line_items')
+      .delete()
+      .eq('id', v.id)
+      .eq('clinic_id', profile.clinic_id);
+
+    if (error) {
+      console.error('[removePaymentLineItem]', error);
+      return { success: false, error: error.message };
+    }
+
+    // Refresh summary description
+    const { data: allItems } = await supabase
+      .from('payment_line_items')
+      .select('description')
+      .eq('payment_id', v.payment_id)
+      .order('sort_order');
+
+    const newDescription = descriptionFromLineItems(allItems || []);
+    await supabase
+      .from('payments')
+      .update({ description: newDescription.length > 0 ? newDescription : 'Charge' })
+      .eq('id', v.payment_id)
+      .eq('clinic_id', profile.clinic_id);
+
+    revalidatePath('/dashboard/payments');
+    revalidatePath('/dashboard/payments/approvals');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[removePaymentLineItem] Unexpected error:', err);
+    return { success: false, error: err?.message || 'Unexpected error' };
+  }
+}
+
+// ── Charge creation ───────────────────────────────────────────────────────────
+
 export async function createManualCharge(
   input: z.infer<typeof CreateManualChargeSchema>
 ) {
@@ -374,19 +619,23 @@ export async function createManualCharge(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = CreateManualChargeSchema.parse(input);
+    const v = CreateManualChargeSchema.parse(input);
+    const description = descriptionFromLineItems(v.line_items);
 
+    // Create payment — amount_charged starts at 0, trigger updates it
     const { data: newPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
         clinic_id: profile.clinic_id,
-        patient_id: validatedInput.patient_id,
+        patient_id: v.patient_id,
         appointment_id: null,
-        description: validatedInput.description,
-        amount_charged: validatedInput.amount_charged,
-        amount_paid: 0,
-        approval_status: 'pending',
-        approval_notes: validatedInput.approval_notes || null,
+        description,
+        amount_charged: v.line_items.reduce(
+  (sum, item) => sum + item.quantity * item.unit_price, 0
+),
+amount_paid: 0,
+approval_status: 'pending',
+        approval_notes: v.approval_notes || null,
         created_by: profile.id,
       })
       .select()
@@ -395,6 +644,25 @@ export async function createManualCharge(
     if (insertError || !newPayment) {
       console.error('[createManualCharge] DB error:', insertError);
       return { success: false, error: insertError?.message || 'Failed to create charge' };
+    }
+
+    // Insert line items — trigger fires per row and updates amount_charged
+    const lineItemRows = v.line_items.map((item, idx) => ({
+      clinic_id: profile.clinic_id,
+      payment_id: newPayment.id,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      sort_order: idx,
+    }));
+
+    const { error: lineItemError } = await supabase
+      .from('payment_line_items')
+      .insert(lineItemRows);
+
+    if (lineItemError) {
+      console.error('[createManualCharge] Line items error:', lineItemError);
+      return { success: false, error: 'Failed to save line items: ' + lineItemError.message };
     }
 
     revalidatePath('/dashboard/payments');
@@ -416,22 +684,36 @@ export async function createManualChargeAndApprove(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = CreateManualChargeSchema.parse(input);
+    const v = CreateManualChargeSchema.parse(input);
+    const description = descriptionFromLineItems(v.line_items);
 
+    // Generate atomic receipt number before insert
+    const { data: receiptNumber, error: receiptError } = await supabase
+      .rpc('next_receipt_number', { p_clinic_id: profile.clinic_id });
+
+    if (receiptError || !receiptNumber) {
+      console.error('[createManualChargeAndApprove] Receipt number error:', receiptError);
+      return { success: false, error: 'Failed to generate receipt number' };
+    }
+
+    // Create approved payment — amount_charged starts at 0, trigger updates it
     const { data: newPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
         clinic_id: profile.clinic_id,
-        patient_id: validatedInput.patient_id,
+        patient_id: v.patient_id,
         appointment_id: null,
-        description: validatedInput.description,
-        amount_charged: validatedInput.amount_charged,
-        amount_paid: 0,
-        approval_status: 'approved',
+        description,
+        amount_charged: v.line_items.reduce(
+  (sum, item) => sum + item.quantity * item.unit_price, 0
+),
+amount_paid: 0,
+approval_status: 'approved',
         approved_by: profile.id,
         approved_at: new Date().toISOString(),
-        approval_notes: validatedInput.approval_notes || null,
+        approval_notes: v.approval_notes || null,
         created_by: profile.id,
+        receipt_number: receiptNumber,
       })
       .select()
       .single();
@@ -439,6 +721,25 @@ export async function createManualChargeAndApprove(
     if (insertError || !newPayment) {
       console.error('[createManualChargeAndApprove] DB error:', insertError);
       return { success: false, error: insertError?.message || 'Failed to create charge' };
+    }
+
+    // Insert line items — trigger fires per row and updates amount_charged
+    const lineItemRows = v.line_items.map((item, idx) => ({
+      clinic_id: profile.clinic_id,
+      payment_id: newPayment.id,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      sort_order: idx,
+    }));
+
+    const { error: lineItemError } = await supabase
+      .from('payment_line_items')
+      .insert(lineItemRows);
+
+    if (lineItemError) {
+      console.error('[createManualChargeAndApprove] Line items error:', lineItemError);
+      return { success: false, error: 'Failed to save line items: ' + lineItemError.message };
     }
 
     try {
@@ -466,12 +767,12 @@ export async function setAmountAndApprovePayment(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = SetAmountAndApprovePaymentSchema.parse(input);
+    const v = SetAmountAndApprovePaymentSchema.parse(input);
 
     const { data: payment, error: fetchError } = await supabase
       .from('payments')
       .select('*')
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id)
       .single();
 
@@ -481,17 +782,46 @@ export async function setAmountAndApprovePayment(
       return { success: false, error: 'Only pending charges can be approved' };
     }
 
+    // Check if this payment has line items
+    // If it does, amount_charged is maintained by trigger — don't override it
+    const { count: lineItemCount } = await supabase
+      .from('payment_line_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('payment_id', v.payment_id)
+      .eq('clinic_id', profile.clinic_id);
+
+    const hasLineItems = (lineItemCount || 0) > 0;
+
+    let receiptNumber = payment.receipt_number || null;
+    if (!receiptNumber) {
+      const { data: newReceiptNumber, error: receiptError } = await supabase
+        .rpc('next_receipt_number', { p_clinic_id: profile.clinic_id });
+
+      if (receiptError || !newReceiptNumber) {
+        console.error('[setAmountAndApprovePayment] Receipt number error:', receiptError);
+        return { success: false, error: 'Failed to generate receipt number' };
+      }
+      receiptNumber = newReceiptNumber;
+    }
+
+    const updatePayload: Record<string, any> = {
+      approval_status: 'approved',
+      approved_by: profile.id,
+      approved_at: new Date().toISOString(),
+      approval_notes: v.approval_notes || null,
+      receipt_number: receiptNumber,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Only set amount manually if no line items — trigger manages it otherwise
+    if (!hasLineItems) {
+      updatePayload.amount_charged = v.amount_charged;
+    }
+
     const { error: updateError } = await supabase
       .from('payments')
-      .update({
-        amount_charged: validatedInput.amount_charged,
-        approval_status: 'approved',
-        approved_by: profile.id,
-        approved_at: new Date().toISOString(),
-        approval_notes: validatedInput.approval_notes || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', validatedInput.payment_id)
+      .update(updatePayload)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id);
 
     if (updateError) {
@@ -500,14 +830,14 @@ export async function setAmountAndApprovePayment(
     }
 
     try {
-      await generateAndStorePaymentDocuments(validatedInput.payment_id);
+      await generateAndStorePaymentDocuments(v.payment_id);
     } catch (docError) {
       console.error('[setAmountAndApprovePayment] Doc generation failed:', docError);
     }
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
-    return { success: true, payment_id: validatedInput.payment_id };
+    return { success: true, payment_id: v.payment_id };
   } catch (err: any) {
     console.error('[setAmountAndApprovePayment] Unexpected error:', err);
     return { success: false, error: err?.message || 'Unexpected error approving charge' };
@@ -524,34 +854,47 @@ export async function approvePayment(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = ApprovePaymentSchema.parse(input);
+    const v = ApprovePaymentSchema.parse(input);
 
     const { data: payment, error: fetchError } = await supabase
       .from('payments')
       .select('*')
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id)
       .single();
 
     if (fetchError || !payment) return { success: false, error: 'Payment not found' };
 
     if (
-      validatedInput.approval_status === 'approved' &&
+      v.approval_status === 'approved' &&
       (!payment.amount_charged || payment.amount_charged === 0)
     ) {
       return { success: false, error: 'Amount charged must be set before approval' };
     }
 
+    let receiptNumber = payment.receipt_number || null;
+    if (v.approval_status === 'approved' && !receiptNumber) {
+      const { data: newReceiptNumber, error: receiptError } = await supabase
+        .rpc('next_receipt_number', { p_clinic_id: profile.clinic_id });
+
+      if (receiptError || !newReceiptNumber) {
+        console.error('[approvePayment] Receipt number error:', receiptError);
+        return { success: false, error: 'Failed to generate receipt number' };
+      }
+      receiptNumber = newReceiptNumber;
+    }
+
     const { error: updateError } = await supabase
       .from('payments')
       .update({
-        approval_status: validatedInput.approval_status,
+        approval_status: v.approval_status,
         approved_by: profile.id,
         approved_at: new Date().toISOString(),
-        approval_notes: validatedInput.approval_notes || null,
+        approval_notes: v.approval_notes || null,
+        receipt_number: receiptNumber,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id);
 
     if (updateError) {
@@ -559,9 +902,9 @@ export async function approvePayment(
       return { success: false, error: 'Failed to update payment' };
     }
 
-    if (validatedInput.approval_status === 'approved') {
+    if (v.approval_status === 'approved') {
       try {
-        await generateAndStorePaymentDocuments(validatedInput.payment_id);
+        await generateAndStorePaymentDocuments(v.payment_id);
       } catch (docError) {
         console.error('[approvePayment] Doc generation failed:', docError);
       }
@@ -569,7 +912,7 @@ export async function approvePayment(
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
-    return { success: true, payment_id: validatedInput.payment_id };
+    return { success: true, payment_id: v.payment_id };
   } catch (err: any) {
     console.error('[approvePayment] Unexpected error:', err);
     return { success: false, error: err?.message || 'Unexpected error' };
@@ -586,12 +929,12 @@ export async function updatePaymentAmount(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = UpdatePaymentAmountSchema.parse(input);
+    const v = UpdatePaymentAmountSchema.parse(input);
 
     const { data: payment, error: fetchError } = await supabase
       .from('payments')
       .select('*')
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id)
       .single();
 
@@ -604,10 +947,10 @@ export async function updatePaymentAmount(
     const { error: updateError } = await supabase
       .from('payments')
       .update({
-        amount_charged: validatedInput.amount_charged,
+        amount_charged: v.amount_charged,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id);
 
     if (updateError) {
@@ -617,7 +960,7 @@ export async function updatePaymentAmount(
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
-    return { success: true, payment_id: validatedInput.payment_id };
+    return { success: true, payment_id: v.payment_id };
   } catch (err: any) {
     console.error('[updatePaymentAmount] Unexpected error:', err);
     return { success: false, error: err?.message || 'Unexpected error' };
@@ -634,12 +977,12 @@ export async function recordPaymentCollection(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = CreatePaymentCollectionSchema.parse(input);
+    const v = CreatePaymentCollectionSchema.parse(input);
 
     const { data: payment, error: fetchError } = await supabase
       .from('payments')
       .select('*')
-      .eq('id', validatedInput.payment_id)
+      .eq('id', v.payment_id)
       .eq('clinic_id', profile.clinic_id)
       .single();
 
@@ -649,7 +992,7 @@ export async function recordPaymentCollection(
       return { success: false, error: 'Can only collect on approved payments' };
     }
 
-    if (validatedInput.amount_collected > payment.outstanding_balance) {
+    if (v.amount_collected > payment.outstanding_balance) {
       return {
         success: false,
         error: `Amount exceeds outstanding balance of Rs.${payment.outstanding_balance.toFixed(2)}`,
@@ -660,13 +1003,13 @@ export async function recordPaymentCollection(
       .from('payment_collections')
       .insert({
         clinic_id: profile.clinic_id,
-        payment_id: validatedInput.payment_id,
-        amount_collected: validatedInput.amount_collected,
-        collection_date: validatedInput.collection_date.toISOString(),
-        payment_method: validatedInput.payment_method,
-        transaction_reference: validatedInput.transaction_reference || null,
+        payment_id: v.payment_id,
+        amount_collected: v.amount_collected,
+        collection_date: v.collection_date.toISOString(),
+        payment_method: v.payment_method,
+        transaction_reference: v.transaction_reference || null,
         collected_by: profile.id,
-        notes: validatedInput.notes || null,
+        notes: v.notes || null,
       })
       .select()
       .single();
@@ -695,12 +1038,12 @@ export async function updatePaymentCollection(
 
     await requireRole('doctor', 'staff');
 
-    const validatedInput = UpdatePaymentCollectionSchema.parse(input);
+    const v = UpdatePaymentCollectionSchema.parse(input);
 
     const { data: collection, error: fetchError } = await supabase
       .from('payment_collections')
       .select('*')
-      .eq('id', validatedInput.id)
+      .eq('id', v.id)
       .eq('clinic_id', profile.clinic_id)
       .single();
 
@@ -717,7 +1060,7 @@ export async function updatePaymentCollection(
 
     const otherCollectionsTotal =
       (payment.amount_paid || 0) - (collection.amount_collected || 0);
-    const newTotal = otherCollectionsTotal + validatedInput.amount_collected;
+    const newTotal = otherCollectionsTotal + v.amount_collected;
 
     if (newTotal > payment.amount_charged) {
       return {
@@ -729,12 +1072,12 @@ export async function updatePaymentCollection(
     const { error: updateError } = await supabase
       .from('payment_collections')
       .update({
-        amount_collected: validatedInput.amount_collected,
-        notes: validatedInput.notes || null,
-        transaction_reference: validatedInput.transaction_reference || null,
+        amount_collected: v.amount_collected,
+        notes: v.notes || null,
+        transaction_reference: v.transaction_reference || null,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', validatedInput.id)
+      .eq('id', v.id)
       .eq('clinic_id', profile.clinic_id);
 
     if (updateError) {
@@ -744,7 +1087,7 @@ export async function updatePaymentCollection(
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
-    return { success: true, collection_id: validatedInput.id };
+    return { success: true, collection_id: v.id };
   } catch (err: any) {
     console.error('[updatePaymentCollection] Unexpected error:', err);
     return { success: false, error: err?.message || 'Unexpected error' };
@@ -761,12 +1104,9 @@ export async function getOutstandingPayments() {
   const { data, error } = await supabase
     .from('payments')
     .select(
-      `
-      *,
-      patients (first_name, last_name),
-      appointments (appointment_date),
-      profiles!created_by (full_name)
-    `
+      `*, patients (first_name, last_name),
+       appointments (appointment_date),
+       profiles!created_by (full_name)`
     )
     .eq('clinic_id', profile.clinic_id)
     .eq('is_overdue', true)

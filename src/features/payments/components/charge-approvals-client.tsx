@@ -9,11 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -24,14 +20,22 @@ import NewChargeDialog from './new-charge-dialog-client';
 import type { PendingChargeView, PatientPickerItem } from '../types';
 
 function formatINR(paise: number): string {
-  return `₹${(paise / 100).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return (
+    '\u20b9' +
+    (paise / 100).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }
 
 function getInitials(name: string): string {
-  return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 function getAvatarColor(name: string): string {
@@ -42,7 +46,8 @@ function getAvatarColor(name: string): string {
     'bg-purple-500/10 text-purple-700 dark:text-purple-400',
     'bg-amber-500/10 text-amber-700 dark:text-amber-400',
   ];
-  const hash = name.charCodeAt(0) + name.charCodeAt(Math.floor(name.length / 2));
+  const hash =
+    name.charCodeAt(0) + name.charCodeAt(Math.floor(name.length / 2));
   return colors[hash % colors.length];
 }
 
@@ -95,8 +100,9 @@ export default function ChargeApprovalsClient({
   const handleApproveClick = (charge: PendingChargeView) => {
     setErrorMessage(null);
     setSelectedCharge(charge);
+    // Pre-fill amount only for non-line-item charges
     setApprovalAmount(
-      charge.proposedAmountPaise > 0
+      !charge.hasLineItems && charge.proposedAmountPaise > 0
         ? (charge.proposedAmountPaise / 100).toFixed(2)
         : ''
     );
@@ -106,10 +112,17 @@ export default function ChargeApprovalsClient({
   const handleConfirmApprove = async () => {
     if (!selectedCharge) return;
 
-    const amountRupees = parseFloat(approvalAmount);
-    if (isNaN(amountRupees) || amountRupees <= 0) {
-      setErrorMessage('Please enter a valid amount');
-      return;
+    let amountRupees: number;
+
+    if (selectedCharge.hasLineItems) {
+      // Amount is maintained by trigger — use the existing total
+      amountRupees = selectedCharge.proposedAmountPaise / 100;
+    } else {
+      amountRupees = parseFloat(approvalAmount);
+      if (isNaN(amountRupees) || amountRupees <= 0) {
+        setErrorMessage('Please enter a valid amount');
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -127,10 +140,10 @@ export default function ChargeApprovalsClient({
         return;
       }
 
-      setLocalCharges((prev) => prev.filter((c) => c.id !== selectedCharge.id));
+      setLocalCharges((prev) =>
+        prev.filter((c) => c.id !== selectedCharge.id)
+      );
       setSelectedCharge(null);
-      setApprovalAmount('');
-      setApprovalNote('');
       router.refresh();
     } catch (err: any) {
       setErrorMessage(err?.message || 'Unexpected error approving charge');
@@ -167,6 +180,7 @@ export default function ChargeApprovalsClient({
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
+
         <div className="mb-8 flex items-start justify-between flex-wrap gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold text-foreground">
@@ -177,8 +191,10 @@ export default function ChargeApprovalsClient({
             </p>
             {localCharges.length > 0 && (
               <p className="text-sm text-muted-foreground mt-3">
-                {localCharges.length} charge{localCharges.length !== 1 ? 's' : ''} awaiting approval
-                {totalProposedPaise > 0 && ` · ${formatINR(totalProposedPaise)} proposed`}
+                {localCharges.length} charge
+                {localCharges.length !== 1 ? 's' : ''} awaiting approval
+                {totalProposedPaise > 0 &&
+                  ' \u00b7 ' + formatINR(totalProposedPaise) + ' proposed'}
               </p>
             )}
           </div>
@@ -208,26 +224,71 @@ export default function ChargeApprovalsClient({
               return (
                 <Card
                   key={charge.id}
-                  className="border-border rounded-xl shadow-sm p-5 flex flex-col md:flex-row md:items-center gap-4 bg-card hover:shadow-md transition-shadow"
+                  className="border-border rounded-xl shadow-sm p-5 flex flex-col md:flex-row md:items-start gap-4 bg-card hover:shadow-md transition-shadow"
                 >
-                  <div className="flex-shrink-0 flex gap-3 items-start md:items-center min-w-0">
+                  {/* Patient info */}
+                  <div className="flex-shrink-0 flex gap-3 items-start min-w-0">
                     <Avatar className={`h-10 w-10 flex-shrink-0 ${avatarColor}`}>
-                      <AvatarFallback>{getInitials(charge.patientName)}</AvatarFallback>
+                      <AvatarFallback>
+                        {getInitials(charge.patientName)}
+                      </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
                       <p className="font-medium text-foreground truncate">
                         {charge.patientName}
                       </p>
-                      <p className="text-xs text-muted-foreground">{charge.patientMrn}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {charge.patientMrn}
+                      </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {charge.service} · {formatDate(charge.date)}
+                        {formatDate(charge.date)}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex-1 md:flex-none flex items-center gap-3">
-                    <div className="flex-1 md:flex-none">
-                      <p className="font-medium text-foreground text-lg">
+                  {/* Line items or single service */}
+                  <div className="flex-1 min-w-0">
+                    {charge.hasLineItems && charge.lineItems.length > 0 ? (
+                      <div className="space-y-1">
+                        {charge.lineItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between text-sm"
+                          >
+                            <span className="text-foreground truncate mr-4">
+                              {item.description}
+                              {item.quantity > 1 && (
+                                <span className="text-muted-foreground ml-1">
+                                  x{item.quantity}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-muted-foreground flex-shrink-0 tabular-nums">
+                              {'\u20b9'}
+                              {Number(item.total_price).toLocaleString('en-IN', {
+                                minimumFractionDigits: 2,
+                              })}
+                            </span>
+                          </div>
+                        ))}
+                        {charge.lineItems.length > 1 && (
+                          <div className="flex justify-between text-sm font-semibold border-t border-border pt-1 mt-1">
+                            <span className="text-foreground">Total</span>
+                            <span className="tabular-nums">
+                              {formatINR(charge.proposedAmountPaise)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-foreground">{charge.service}</p>
+                    )}
+                  </div>
+
+                  {/* Amount + status + actions */}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-right">
+                      <p className="font-medium text-foreground text-lg tabular-nums">
                         {charge.proposedAmountPaise > 0
                           ? formatINR(charge.proposedAmountPaise)
                           : 'Fee not set'}
@@ -236,26 +297,26 @@ export default function ChargeApprovalsClient({
                         Pending Approval
                       </Badge>
                     </div>
-                  </div>
 
-                  <div className="flex gap-2 flex-shrink-0">
-                    <Button
-                      onClick={() => handleApproveClick(charge)}
-                      disabled={isLoading}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                      size="sm"
-                    >
-                      Set & Approve
-                    </Button>
-                    <Button
-                      onClick={() => handleReject(charge.id)}
-                      disabled={isLoading}
-                      variant="outline"
-                      size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                    >
-                      Reject
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        onClick={() => handleApproveClick(charge)}
+                        disabled={isLoading}
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                        size="sm"
+                      >
+                        {charge.hasLineItems ? 'Approve' : 'Set & Approve'}
+                      </Button>
+                      <Button
+                        onClick={() => handleReject(charge.id)}
+                        disabled={isLoading}
+                        variant="outline"
+                        size="sm"
+                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                      >
+                        Reject
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               );
@@ -264,6 +325,7 @@ export default function ChargeApprovalsClient({
         )}
       </div>
 
+      {/* ── Approve dialog ────────────────────────────────────── */}
       <Dialog
         open={!!selectedCharge}
         onOpenChange={(open) => !open && setSelectedCharge(null)}
@@ -275,39 +337,89 @@ export default function ChargeApprovalsClient({
 
           {selectedCharge && (
             <div className="space-y-4">
+              {/* Patient + date */}
               <div className="space-y-2 p-3 bg-muted rounded-lg">
                 <div>
-                  <span className="text-xs font-medium text-muted-foreground">Patient:</span>
-                  <p className="text-sm text-foreground">{selectedCharge.patientName}</p>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Patient:
+                  </span>
+                  <p className="text-sm text-foreground">
+                    {selectedCharge.patientName}
+                  </p>
                 </div>
                 <div>
-                  <span className="text-xs font-medium text-muted-foreground">Service:</span>
-                  <p className="text-sm text-foreground">{selectedCharge.service}</p>
-                </div>
-                <div>
-                  <span className="text-xs font-medium text-muted-foreground">Date:</span>
-                  <p className="text-sm text-foreground">{formatDate(selectedCharge.date)}</p>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Date:
+                  </span>
+                  <p className="text-sm text-foreground">
+                    {formatDate(selectedCharge.date)}
+                  </p>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="approve-amount">Amount (₹)</Label>
-                <Input
-                  id="approve-amount"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={approvalAmount}
-                  onChange={(e) => setApprovalAmount(e.target.value)}
-                  placeholder="0.00"
-                  disabled={isLoading}
-                  className="border-border bg-background text-foreground"
-                />
-              </div>
+              {/* Line items OR amount input */}
+              {selectedCharge.hasLineItems ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Services
+                  </p>
+                  <div className="rounded-lg border border-border divide-y divide-border">
+                    {selectedCharge.lineItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between px-3 py-2 text-sm"
+                      >
+                        <span className="text-foreground">
+                          {item.description}
+                          {item.quantity > 1 && (
+                            <span className="text-muted-foreground ml-1">
+                              x{item.quantity}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-foreground tabular-nums font-medium">
+                          {'\u20b9'}
+                          {Number(item.total_price).toLocaleString('en-IN', {
+                            minimumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                    {selectedCharge.lineItems.length > 1 && (
+                      <div className="flex items-center justify-between px-3 py-2 text-sm font-bold bg-muted/50">
+                        <span>Total</span>
+                        <span className="tabular-nums">
+                          {formatINR(selectedCharge.proposedAmountPaise)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="approve-amount">Amount (\u20b9)</Label>
+                  <Input
+                    id="approve-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={approvalAmount}
+                    onChange={(e) => setApprovalAmount(e.target.value)}
+                    placeholder="0.00"
+                    disabled={isLoading}
+                    className="border-border bg-background text-foreground"
+                  />
+                </div>
+              )}
+
+              {errorMessage && (
+                <p className="text-sm text-destructive">{errorMessage}</p>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="approve-note">
-                  Note <span className="text-xs text-muted-foreground">(optional)</span>
+                  Note{' '}
+                  <span className="text-xs text-muted-foreground">(optional)</span>
                 </Label>
                 <Textarea
                   id="approve-note"
@@ -315,7 +427,7 @@ export default function ChargeApprovalsClient({
                   onChange={(e) => setApprovalNote(e.target.value)}
                   placeholder="Add any notes..."
                   disabled={isLoading}
-                  rows={3}
+                  rows={2}
                   className="border-border bg-background text-foreground resize-none"
                 />
               </div>

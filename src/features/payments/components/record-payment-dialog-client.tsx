@@ -6,42 +6,27 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
+  Dialog, DialogContent, DialogFooter, DialogHeader,
+  DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
+  Command, CommandEmpty, CommandGroup, CommandInput,
+  CommandItem, CommandList,
 } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { recordPaymentCollection } from '../actions';
 import type { ApprovedChargeView } from '../types';
 
-interface RecordPaymentDialogProps {
+interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   approvedCharges: ApprovedChargeView[];
@@ -49,18 +34,22 @@ interface RecordPaymentDialogProps {
 }
 
 function formatINR(paise: number): string {
-  return `₹${(paise / 100).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return (
+    '₹' +
+    (paise / 100).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }
 
 function getTodayDateString(): string {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, '0'),
+    String(today.getDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 export default function RecordPaymentDialog({
@@ -68,28 +57,27 @@ export default function RecordPaymentDialog({
   onOpenChange,
   approvedCharges,
   defaultChargeId = null,
-}: RecordPaymentDialogProps) {
+}: Props) {
   const router = useRouter();
-  const [chargeId, setChargeId] = useState<string>('');
-  const [amountReceivedRupees, setAmountReceivedRupees] = useState<string>('');
-  const [mode, setMode] = useState<string>('');
-  const [date, setDate] = useState<string>(getTodayDateString());
-  const [reference, setReference] = useState<string>('');
-  const [notes, setNotes] = useState<string>('');
-  const [isComboboxOpen, setIsComboboxOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+
+  const [chargeId, setChargeId]               = useState('');
+  const [amount, setAmount]                   = useState('');
+  const [mode, setMode]                       = useState('');
+  const [date, setDate]                       = useState(getTodayDateString());
+  const [reference, setReference]             = useState('');
+  const [notes, setNotes]                     = useState('');
+  const [isComboOpen, setIsComboOpen]         = useState(false);
+  const [isLoading, setIsLoading]             = useState(false);
+  const [errorMessage, setErrorMessage]       = useState<string | null>(null);
+  const [searchTerm, setSearchTerm]           = useState('');
 
   useEffect(() => {
-    if (open && defaultChargeId) {
-      setChargeId(defaultChargeId);
-    }
+    if (open && defaultChargeId) setChargeId(defaultChargeId);
   }, [open, defaultChargeId]);
 
   const resetForm = () => {
     setChargeId('');
-    setAmountReceivedRupees('');
+    setAmount('');
     setMode('');
     setDate(getTodayDateString());
     setReference('');
@@ -98,9 +86,9 @@ export default function RecordPaymentDialog({
     setSearchTerm('');
   };
 
-  const handleOpenChange = (newOpen: boolean) => {
-    onOpenChange(newOpen);
-    if (!newOpen) resetForm();
+  const handleOpenChange = (v: boolean) => {
+    onOpenChange(v);
+    if (!v) resetForm();
   };
 
   const selectedCharge = useMemo(
@@ -108,31 +96,32 @@ export default function RecordPaymentDialog({
     [chargeId, approvedCharges]
   );
 
+  // Pre-fill amount when charge is selected
   useEffect(() => {
     if (selectedCharge) {
-      setAmountReceivedRupees((selectedCharge.amountDuePaise / 100).toFixed(2));
+      setAmount((selectedCharge.amountDuePaise / 100).toFixed(2));
     }
   }, [selectedCharge]);
 
   const filteredCharges = useMemo(() => {
     if (!searchTerm.trim()) return approvedCharges;
-    const term = searchTerm.toLowerCase();
+    const t = searchTerm.toLowerCase();
     return approvedCharges.filter(
       (c) =>
-        c.patientName.toLowerCase().includes(term) ||
-        c.patientMrn.toLowerCase().includes(term) ||
-        c.service.toLowerCase().includes(term)
+        c.patientName.toLowerCase().includes(t) ||
+        c.patientMrn.toLowerCase().includes(t) ||
+        c.service.toLowerCase().includes(t)
     );
   }, [approvedCharges, searchTerm]);
 
-  const isValid = chargeId && amountReceivedRupees && mode && date;
+  const isValid = chargeId && amount && mode && date;
 
   const handleSubmit = async () => {
     if (!isValid || !selectedCharge) return;
 
-    const amountReceivedPaise = Math.round(parseFloat(amountReceivedRupees) * 100);
+    const amountPaise = Math.round(parseFloat(amount) * 100);
 
-    if (amountReceivedPaise > selectedCharge.amountDuePaise) {
+    if (amountPaise > selectedCharge.amountDuePaise) {
       setErrorMessage(
         `Amount exceeds outstanding balance of ${formatINR(selectedCharge.amountDuePaise)}`
       );
@@ -145,15 +134,11 @@ export default function RecordPaymentDialog({
     try {
       const result = await recordPaymentCollection({
         payment_id: chargeId,
-        amount_collected: amountReceivedPaise / 100,
+        amount_collected: amountPaise / 100,
         collection_date: new Date(date),
         payment_method: mode as
-          | 'cash'
-          | 'card'
-          | 'upi'
-          | 'bank_transfer'
-          | 'check'
-          | 'other',
+          | 'cash' | 'card' | 'upi'
+          | 'bank_transfer' | 'check' | 'other',
         transaction_reference: reference.trim() || null,
         notes: notes.trim() || null,
       });
@@ -166,7 +151,7 @@ export default function RecordPaymentDialog({
       handleOpenChange(false);
       router.refresh();
     } catch (err: any) {
-      console.error('[RecordPaymentDialog] submit error:', err);
+      console.error('[RecordPaymentDialog]', err);
       setErrorMessage(err?.message || 'An unexpected error occurred.');
     } finally {
       setIsLoading(false);
@@ -175,7 +160,7 @@ export default function RecordPaymentDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="w-full max-w-lg">
+      <DialogContent className="w-full max-w-md">
         <DialogHeader>
           <DialogTitle>Record Payment</DialogTitle>
           <DialogDescription>
@@ -189,29 +174,33 @@ export default function RecordPaymentDialog({
           </div>
         )}
 
-        <div className="space-y-5">
+        {/* Scrollable body */}
+        <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+
+          {/* Charge selector */}
           <div className="space-y-2">
             <Label htmlFor="charge-combobox">
               Charge <span className="text-destructive">*</span>
             </Label>
-            <Popover open={isComboboxOpen} onOpenChange={setIsComboboxOpen}>
+            <Popover open={isComboOpen} onOpenChange={setIsComboOpen}>
               <PopoverTrigger asChild>
                 <Button
                   id="charge-combobox"
                   variant="outline"
                   className={cn(
-                    'w-full justify-between',
+                    'w-full justify-between text-left font-normal',
                     !chargeId && 'text-muted-foreground'
                   )}
                 >
-                  {selectedCharge ? (
-                    <span className="truncate">
-                      {selectedCharge.patientName} · {selectedCharge.service} ·
-                      Due {formatINR(selectedCharge.amountDuePaise)}
-                    </span>
-                  ) : (
-                    'Select a charge...'
-                  )}
+                  <span className="truncate">
+                    {selectedCharge
+                      ? selectedCharge.patientName +
+                        ' · ' +
+                        selectedCharge.service +
+                        ' · Due ' +
+                        formatINR(selectedCharge.amountDuePaise)
+                      : 'Select a charge...'}
+                  </span>
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
@@ -233,13 +222,13 @@ export default function RecordPaymentDialog({
                             value={c.id}
                             onSelect={() => {
                               setChargeId(c.id);
-                              setIsComboboxOpen(false);
+                              setIsComboOpen(false);
                               setSearchTerm('');
                             }}
                           >
                             <Check
                               className={cn(
-                                'mr-2 h-4 w-4',
+                                'mr-2 h-4 w-4 flex-shrink-0',
                                 chargeId === c.id ? 'opacity-100' : 'opacity-0'
                               )}
                             />
@@ -257,18 +246,19 @@ export default function RecordPaymentDialog({
             </Popover>
 
             {selectedCharge && (
-              <div className="rounded bg-muted px-3 py-2 text-sm text-muted-foreground">
-                Amount due: {formatINR(selectedCharge.amountDuePaise)}
-              </div>
+              <p className="text-xs text-muted-foreground px-1">
+                Outstanding: {formatINR(selectedCharge.amountDuePaise)}
+              </p>
             )}
           </div>
 
+          {/* Amount */}
           <div className="space-y-2">
             <Label htmlFor="amount-received">
               Amount Received <span className="text-destructive">*</span>
             </Label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">
                 ₹
               </span>
               <Input
@@ -276,19 +266,20 @@ export default function RecordPaymentDialog({
                 type="text"
                 inputMode="decimal"
                 placeholder="0.00"
-                value={amountReceivedRupees}
-                onChange={(e) => setAmountReceivedRupees(e.target.value)}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
                 className="pl-7"
               />
             </div>
           </div>
 
+          {/* Payment mode */}
           <div className="space-y-2">
             <Label htmlFor="payment-mode">
               Payment Mode <span className="text-destructive">*</span>
             </Label>
             <Select value={mode} onValueChange={setMode}>
-              <SelectTrigger id="payment-mode">
+              <SelectTrigger id="payment-mode" className="w-full">
                 <SelectValue placeholder="Select payment mode" />
               </SelectTrigger>
               <SelectContent>
@@ -302,43 +293,55 @@ export default function RecordPaymentDialog({
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="payment-date">
-                Payment Date <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="payment-date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reference-no">Reference / UTR No.</Label>
-              <Input
-                id="reference-no"
-                type="text"
-                placeholder="UPI txn id / UTR"
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-              />
-            </div>
+          {/* Payment date — full width */}
+          <div className="space-y-2">
+            <Label htmlFor="payment-date">
+              Payment Date <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="payment-date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full"
+            />
           </div>
 
+          {/* Reference / UTR — full width below date */}
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="reference-no">
+              Reference / UTR No.{' '}
+              <span className="text-xs text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="reference-no"
+              type="text"
+              placeholder="UPI txn id / UTR"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className="w-full"
+            />
+          </div>
+
+          {/* Notes */}
+          <div className="space-y-2">
+            <Label htmlFor="notes">
+              Notes{' '}
+              <span className="text-xs text-muted-foreground">(optional)</span>
+            </Label>
             <Textarea
               id="notes"
               placeholder="Add any additional notes..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="resize-none"
+              rows={2}
             />
           </div>
+
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="gap-2 pt-4 border-t border-border">
           <Button
             variant="outline"
             onClick={() => handleOpenChange(false)}
@@ -346,7 +349,11 @@ export default function RecordPaymentDialog({
           >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!isValid || isLoading}>
+          <Button
+            onClick={handleSubmit}
+            disabled={!isValid || isLoading}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+          >
             {isLoading ? 'Recording...' : 'Record Payment'}
           </Button>
         </DialogFooter>

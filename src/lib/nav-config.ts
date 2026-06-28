@@ -1,3 +1,5 @@
+// src/lib/nav-config.ts
+
 import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard,
@@ -6,6 +8,7 @@ import {
   Receipt,
   MessageSquare,
   ClipboardCheck,
+  Settings,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/profile'
 
@@ -24,6 +27,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
     { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
+    { title: 'Settings', href: '/dashboard/settings', icon: Settings },
   ],
   staff: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -32,6 +36,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
     { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
+    { title: 'Settings', href: '/dashboard/settings', icon: Settings },
   ],
   patient: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
