@@ -30,6 +30,7 @@ import type {
   PaymentLineItem,
 } from './types';
 import { generateAndStorePaymentDocuments } from './document-storage';
+import { createReceiptMessage } from '@/features/messaging/actions';
 import type { z } from 'zod';
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -45,7 +46,6 @@ function patientFullName(row: any): string {
   return `${row?.first_name || ''} ${row?.last_name || ''}`.trim() || 'Unknown';
 }
 
-// Compute a summary description from line items
 function descriptionFromLineItems(items: Array<{ description: string }>): string {
   if (items.length === 0) return 'Charge';
   if (items.length === 1) return items[0].description;
@@ -420,7 +420,6 @@ export async function addPaymentLineItem(
 
     const v = AddLineItemSchema.parse(input);
 
-    // Verify payment belongs to this clinic
     const { data: payment, error: fetchError } = await supabase
       .from('payments')
       .select('id, amount_paid, approval_status')
@@ -444,7 +443,6 @@ export async function addPaymentLineItem(
       return { success: false, error: error.message };
     }
 
-    // Update summary description on the payment
     const { data: allItems } = await supabase
       .from('payment_line_items')
       .select('description')
@@ -479,7 +477,6 @@ export async function updatePaymentLineItem(
 
     const v = UpdateLineItemSchema.parse(input);
 
-    // Verify the line item and parent payment
     const { data: item, error: itemError } = await supabase
       .from('payment_line_items')
       .select('*, payments (amount_paid, amount_charged)')
@@ -489,7 +486,6 @@ export async function updatePaymentLineItem(
 
     if (itemError || !item) return { success: false, error: 'Line item not found' };
 
-    // Validate: new total >= amount_paid
     const payment: any = item.payments;
     const newItemTotal = v.quantity * v.unit_price;
     const otherItemsTotal = (payment.amount_charged || 0) - (item.total_price || 0);
@@ -518,7 +514,6 @@ export async function updatePaymentLineItem(
       return { success: false, error: error.message };
     }
 
-    // Refresh summary description
     const { data: allItems } = await supabase
       .from('payment_line_items')
       .select('description')
@@ -553,7 +548,6 @@ export async function removePaymentLineItem(
 
     const v = RemoveLineItemSchema.parse(input);
 
-    // Fetch item + parent payment for validation
     const { data: item, error: itemError } = await supabase
       .from('payment_line_items')
       .select('*, payments (amount_paid, amount_charged)')
@@ -584,7 +578,6 @@ export async function removePaymentLineItem(
       return { success: false, error: error.message };
     }
 
-    // Refresh summary description
     const { data: allItems } = await supabase
       .from('payment_line_items')
       .select('description')
@@ -622,7 +615,6 @@ export async function createManualCharge(
     const v = CreateManualChargeSchema.parse(input);
     const description = descriptionFromLineItems(v.line_items);
 
-    // Create payment — amount_charged starts at 0, trigger updates it
     const { data: newPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
@@ -631,10 +623,10 @@ export async function createManualCharge(
         appointment_id: null,
         description,
         amount_charged: v.line_items.reduce(
-  (sum, item) => sum + item.quantity * item.unit_price, 0
-),
-amount_paid: 0,
-approval_status: 'pending',
+          (sum, item) => sum + item.quantity * item.unit_price, 0
+        ),
+        amount_paid: 0,
+        approval_status: 'pending',
         approval_notes: v.approval_notes || null,
         created_by: profile.id,
       })
@@ -646,7 +638,6 @@ approval_status: 'pending',
       return { success: false, error: insertError?.message || 'Failed to create charge' };
     }
 
-    // Insert line items — trigger fires per row and updates amount_charged
     const lineItemRows = v.line_items.map((item, idx) => ({
       clinic_id: profile.clinic_id,
       payment_id: newPayment.id,
@@ -687,7 +678,6 @@ export async function createManualChargeAndApprove(
     const v = CreateManualChargeSchema.parse(input);
     const description = descriptionFromLineItems(v.line_items);
 
-    // Generate atomic receipt number before insert
     const { data: receiptNumber, error: receiptError } = await supabase
       .rpc('next_receipt_number', { p_clinic_id: profile.clinic_id });
 
@@ -696,7 +686,6 @@ export async function createManualChargeAndApprove(
       return { success: false, error: 'Failed to generate receipt number' };
     }
 
-    // Create approved payment — amount_charged starts at 0, trigger updates it
     const { data: newPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
@@ -705,10 +694,10 @@ export async function createManualChargeAndApprove(
         appointment_id: null,
         description,
         amount_charged: v.line_items.reduce(
-  (sum, item) => sum + item.quantity * item.unit_price, 0
-),
-amount_paid: 0,
-approval_status: 'approved',
+          (sum, item) => sum + item.quantity * item.unit_price, 0
+        ),
+        amount_paid: 0,
+        approval_status: 'approved',
         approved_by: profile.id,
         approved_at: new Date().toISOString(),
         approval_notes: v.approval_notes || null,
@@ -723,7 +712,6 @@ approval_status: 'approved',
       return { success: false, error: insertError?.message || 'Failed to create charge' };
     }
 
-    // Insert line items — trigger fires per row and updates amount_charged
     const lineItemRows = v.line_items.map((item, idx) => ({
       clinic_id: profile.clinic_id,
       payment_id: newPayment.id,
@@ -746,6 +734,13 @@ approval_status: 'approved',
       await generateAndStorePaymentDocuments(newPayment.id);
     } catch (docError) {
       console.error('[createManualChargeAndApprove] Doc generation failed:', docError);
+    }
+
+    // Queue WhatsApp receipt message — non-blocking
+    try {
+      await createReceiptMessage({ paymentId: newPayment.id });
+    } catch (err) {
+      console.error('[createManualChargeAndApprove] Receipt message failed:', err);
     }
 
     revalidatePath('/dashboard/payments');
@@ -782,8 +777,6 @@ export async function setAmountAndApprovePayment(
       return { success: false, error: 'Only pending charges can be approved' };
     }
 
-    // Check if this payment has line items
-    // If it does, amount_charged is maintained by trigger — don't override it
     const { count: lineItemCount } = await supabase
       .from('payment_line_items')
       .select('id', { count: 'exact', head: true })
@@ -813,7 +806,6 @@ export async function setAmountAndApprovePayment(
       updated_at: new Date().toISOString(),
     };
 
-    // Only set amount manually if no line items — trigger manages it otherwise
     if (!hasLineItems) {
       updatePayload.amount_charged = v.amount_charged;
     }
@@ -833,6 +825,13 @@ export async function setAmountAndApprovePayment(
       await generateAndStorePaymentDocuments(v.payment_id);
     } catch (docError) {
       console.error('[setAmountAndApprovePayment] Doc generation failed:', docError);
+    }
+
+    // Queue WhatsApp receipt message — non-blocking
+    try {
+      await createReceiptMessage({ paymentId: v.payment_id });
+    } catch (err) {
+      console.error('[setAmountAndApprovePayment] Receipt message failed:', err);
     }
 
     revalidatePath('/dashboard/payments');
@@ -907,6 +906,13 @@ export async function approvePayment(
         await generateAndStorePaymentDocuments(v.payment_id);
       } catch (docError) {
         console.error('[approvePayment] Doc generation failed:', docError);
+      }
+
+      // Queue WhatsApp receipt message — non-blocking
+      try {
+        await createReceiptMessage({ paymentId: v.payment_id });
+      } catch (err) {
+        console.error('[approvePayment] Receipt message failed:', err);
       }
     }
 

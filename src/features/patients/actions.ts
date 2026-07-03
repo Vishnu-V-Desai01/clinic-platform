@@ -12,26 +12,15 @@
 
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-
 import { patientFormSchema } from "./schema"
-import type { PatientFormData } from "./schema"             // FIXED: was "./types"
+import type { PatientFormData } from "./schema"
 import { calculateAge } from "./types"
 import type { PatientListItem, PatientRecord } from "./types"
-
-/* -------------------------------------------------------------------------- */
-/*  Result envelope                                                            */
-/*  Every action returns one of these — callers always know what to expect.   */
-/* -------------------------------------------------------------------------- */
+import { createRegistrationMessage } from "@/features/messaging/actions"
 
 type Result<T> =
   | { success: true; data: T }
   | { success: false; error: string }
-
-/* -------------------------------------------------------------------------- */
-/*  toDbRow                                                                    */
-/*  Maps cleaned Zod output (camelCase) → exact DB column names (snake_case). */
-/*  clinic_id always comes from the authenticated profile, never from the form.*/
-/* -------------------------------------------------------------------------- */
 
 function toDbRow(data: PatientFormData, clinicId: string) {
   return {
@@ -57,11 +46,6 @@ function toDbRow(data: PatientFormData, clinicId: string) {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  toListItem                                                                 */
-/*  Shrinks a full DB row to the compact shape the patients table displays.    */
-/* -------------------------------------------------------------------------- */
-
 function toListItem(row: PatientRecord): PatientListItem {
   return {
     id:        row.id,
@@ -75,15 +59,9 @@ function toListItem(row: PatientRecord): PatientListItem {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  listPatients                                                               */
-/*  Returns all non-deleted patients for the clinic, newest first.            */
-/*  Only the columns the list table needs are fetched — keeps payload small.  */
-/* -------------------------------------------------------------------------- */
-
 export async function listPatients(): Promise<Result<PatientListItem[]>> {
   try {
-    const profile  = await requireRole("doctor", "staff")   // FIXED: rest params
+    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -105,16 +83,9 @@ export async function listPatients(): Promise<Result<PatientListItem[]>> {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  getPatient                                                                 */
-/*  Returns one patient's full record.                                        */
-/*  The double .eq() — id AND clinic_id — means staff from another clinic     */
-/*  can never read this record even if they somehow know the UUID.            */
-/* -------------------------------------------------------------------------- */
-
 export async function getPatient(id: string): Promise<Result<PatientRecord>> {
   try {
-    const profile  = await requireRole("doctor", "staff")   // FIXED: rest params
+    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -135,24 +106,14 @@ export async function getPatient(id: string): Promise<Result<PatientRecord>> {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  createPatient                                                              */
-/*  1. Authorises caller.                                                     */
-/*  2. Validates form data with Zod — returns the first friendly error on     */
-/*     failure so the UI can show it.                                         */
-/*  3. Inserts and returns the newly created row.                             */
-/*  NOTE: patient_id_number (MRN) is NOT in the insert payload — the         */
-/*  database DEFAULT generates it automatically from the sequence we set up. */
-/* -------------------------------------------------------------------------- */
-
 export async function createPatient(raw: unknown): Promise<Result<PatientRecord>> {
   try {
-    const profile = await requireRole("doctor", "staff")    // FIXED: rest params
+    const profile = await requireRole("doctor", "staff")
 
     const parsed = patientFormSchema.safeParse(raw)
     if (!parsed.success) {
       const message =
-        parsed.error.issues[0]?.message ?? "Please check the form and try again." // FIXED: .issues
+        parsed.error.issues[0]?.message ?? "Please check the form and try again."
       return { success: false, error: message }
     }
 
@@ -167,6 +128,13 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
 
     if (error) throw error
 
+    // Queue WhatsApp registration message — non-blocking, failure does not affect patient creation
+    try {
+      await createRegistrationMessage({ patientId: (data as PatientRecord).id })
+    } catch (err) {
+      console.error("[createPatient] Registration message failed:", err)
+    }
+
     return { success: true, data: data as PatientRecord }
   } catch (err) {
     console.error("[createPatient]", err)
@@ -174,30 +142,22 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  updatePatient                                                              */
-/*  Same validation flow as create.                                           */
-/*  clinic_id and patient_id_number are stripped from the update payload —   */
-/*  those two columns must never change after a patient is registered.        */
-/* -------------------------------------------------------------------------- */
-
 export async function updatePatient(
   id:  string,
   raw: unknown,
 ): Promise<Result<PatientRecord>> {
   try {
-    const profile = await requireRole("doctor", "staff")    // FIXED: rest params
+    const profile = await requireRole("doctor", "staff")
 
     const parsed = patientFormSchema.safeParse(raw)
     if (!parsed.success) {
       const message =
-        parsed.error.issues[0]?.message ?? "Please check the form and try again." // FIXED: .issues
+        parsed.error.issues[0]?.message ?? "Please check the form and try again."
       return { success: false, error: message }
     }
 
     const supabase = createServerSupabaseClient()
 
-    // Build the update object, then remove clinic_id — it must never change.
     const { clinic_id: _clinicId, ...updateRow } = toDbRow(
       parsed.data,
       profile.clinic_id,
@@ -222,18 +182,11 @@ export async function updatePatient(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  archivePatient                                                             */
-/*  Sets status → "archived". NOT a hard delete.                              */
-/*  The record stays in the database; it's just filtered from the default     */
-/*  list view. Doctors/staff can still find archived patients with the filter. */
-/* -------------------------------------------------------------------------- */
-
 export async function archivePatient(
   id: string,
 ): Promise<Result<{ id: string }>> {
   try {
-    const profile  = await requireRole("doctor", "staff")   // FIXED: rest params
+    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { error } = await supabase

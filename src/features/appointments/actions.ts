@@ -11,6 +11,7 @@
 
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAppointmentMessage } from "@/features/messaging/actions"
 
 import {
   cancelAppointmentSchema,
@@ -34,18 +35,9 @@ import {
   type DoctorOption,
 } from "./types"
 
-/* -------------------------------------------------------------------------- */
-/*  Result envelope                                                            */
-/* -------------------------------------------------------------------------- */
-
 type Result<T> =
   | { success: true; data: T }
   | { success: false; error: string }
-
-/* -------------------------------------------------------------------------- */
-/*  Internal query row types                                                   */
-/*  These describe the shape Supabase returns for joined queries.             */
-/* -------------------------------------------------------------------------- */
 
 type PatientJoin = {
   first_name: string
@@ -77,10 +69,6 @@ type AppointmentDetailRow = AppointmentListRow & {
   created_at: string
   updated_at: string
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
 
 function combineDateAndTime(date: string, time: string): string {
   return `${date}T${time}:00+05:30`
@@ -120,14 +108,6 @@ function toDetail(row: AppointmentWithContext): AppointmentDetail {
     updatedAt:           row.updated_at,
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/*  checkDoubleBooking                                                         */
-/*  Fetches all the doctor's scheduled appointments for the same calendar     */
-/*  day, then checks for true interval overlap in JS:                         */
-/*    overlap = proposed_start < existing_end AND proposed_end > existing_start */
-/*  This correctly catches e.g. a 60-min slot at 2 PM when booking at 2:30.  */
-/* -------------------------------------------------------------------------- */
 
 async function checkDoubleBooking(
   supabase: ReturnType<typeof createServerSupabaseClient>,
@@ -172,11 +152,6 @@ async function checkDoubleBooking(
   return false
 }
 
-/* -------------------------------------------------------------------------- */
-/*  listDoctors                                                                */
-/*  Returns all doctor profiles in the clinic for the booking form dropdown.  */
-/* -------------------------------------------------------------------------- */
-
 export async function listDoctors(): Promise<Result<DoctorOption[]>> {
   try {
     const profile  = await requireRole("doctor", "staff")
@@ -204,18 +179,12 @@ export async function listDoctors(): Promise<Result<DoctorOption[]>> {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  listAppointments                                                           */
-/*  Returns all non-deleted appointments for the clinic, newest first.        */
-/*  Optional filters narrow by patient, doctor, status, or date range.        */
-/* -------------------------------------------------------------------------- */
-
 export async function listAppointments(filters?: {
   patientId?: string
   doctorId?:  string
   status?:    string
-  dateFrom?:  string   // "YYYY-MM-DD"
-  dateTo?:    string   // "YYYY-MM-DD"
+  dateFrom?:  string
+  dateTo?:    string
 }): Promise<Result<AppointmentListItem[]>> {
   try {
     const profile  = await requireRole("doctor", "staff")
@@ -280,11 +249,6 @@ export async function listAppointments(filters?: {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  getAppointmentById                                                         */
-/*  Returns full details for one appointment.                                 */
-/* -------------------------------------------------------------------------- */
-
 export async function getAppointmentById(
   appointmentId: string,
 ): Promise<Result<AppointmentDetail>> {
@@ -347,10 +311,6 @@ export async function getAppointmentById(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  createAppointment                                                          */
-/* -------------------------------------------------------------------------- */
-
 export async function createAppointment(
   input: Record<string, unknown>,
 ): Promise<Result<AppointmentRecord>> {
@@ -390,16 +350,19 @@ export async function createAppointment(
 
     if (error) throw error
 
+    // Queue WhatsApp appointment reminder — non-blocking
+    try {
+      await createAppointmentMessage({ appointmentId: (created as AppointmentRecord).id })
+    } catch (err) {
+      console.error("[createAppointment] Appointment message failed:", err)
+    }
+
     return { success: true, data: created as AppointmentRecord }
   } catch (err) {
     console.error("[createAppointment]", err)
     return { success: false, error: "Failed to create appointment." }
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/*  rescheduleAppointment                                                      */
-/* -------------------------------------------------------------------------- */
 
 export async function rescheduleAppointment(
   appointmentId: string,
@@ -461,12 +424,6 @@ export async function rescheduleAppointment(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  cancelAppointment                                                          */
-/*  Sets status → "cancelled". Does NOT set deleted_at — cancelled            */
-/*  appointments must remain visible in history.                              */
-/* -------------------------------------------------------------------------- */
-
 export async function cancelAppointment(
   appointmentId: string,
   input?: Record<string, unknown>,
@@ -521,11 +478,6 @@ export async function cancelAppointment(
     return { success: false, error: "Failed to cancel appointment." }
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/*  updateAppointmentStatus                                                    */
-/*  Doctor-only: mark completed or no_show, optionally add clinical notes.    */
-/* -------------------------------------------------------------------------- */
 
 export async function updateAppointmentStatus(
   appointmentId: string,
