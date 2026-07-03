@@ -16,7 +16,6 @@ import { patientFormSchema } from "./schema"
 import type { PatientFormData } from "./schema"
 import { calculateAge } from "./types"
 import type { PatientListItem, PatientRecord } from "./types"
-import { createRegistrationMessage } from "@/features/messaging/actions"
 
 type Result<T> =
   | { success: true; data: T }
@@ -129,11 +128,6 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
     if (error) throw error
 
     // Queue WhatsApp registration message — non-blocking, failure does not affect patient creation
-    try {
-      await createRegistrationMessage({ patientId: (data as PatientRecord).id })
-    } catch (err) {
-      console.error("[createPatient] Registration message failed:", err)
-    }
 
     return { success: true, data: data as PatientRecord }
   } catch (err) {

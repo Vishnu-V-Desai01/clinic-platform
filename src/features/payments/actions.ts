@@ -30,7 +30,6 @@ import type {
   PaymentLineItem,
 } from './types';
 import { generateAndStorePaymentDocuments } from './document-storage';
-import { createReceiptMessage } from '@/features/messaging/actions';
 import type { z } from 'zod';
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -736,13 +735,6 @@ export async function createManualChargeAndApprove(
       console.error('[createManualChargeAndApprove] Doc generation failed:', docError);
     }
 
-    // Queue WhatsApp receipt message — non-blocking
-    try {
-      await createReceiptMessage({ paymentId: newPayment.id });
-    } catch (err) {
-      console.error('[createManualChargeAndApprove] Receipt message failed:', err);
-    }
-
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
     return { success: true, payment_id: newPayment.id };
@@ -827,13 +819,6 @@ export async function setAmountAndApprovePayment(
       console.error('[setAmountAndApprovePayment] Doc generation failed:', docError);
     }
 
-    // Queue WhatsApp receipt message — non-blocking
-    try {
-      await createReceiptMessage({ paymentId: v.payment_id });
-    } catch (err) {
-      console.error('[setAmountAndApprovePayment] Receipt message failed:', err);
-    }
-
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
     return { success: true, payment_id: v.payment_id };
@@ -906,13 +891,6 @@ export async function approvePayment(
         await generateAndStorePaymentDocuments(v.payment_id);
       } catch (docError) {
         console.error('[approvePayment] Doc generation failed:', docError);
-      }
-
-      // Queue WhatsApp receipt message — non-blocking
-      try {
-        await createReceiptMessage({ paymentId: v.payment_id });
-      } catch (err) {
-        console.error('[approvePayment] Receipt message failed:', err);
       }
     }
 

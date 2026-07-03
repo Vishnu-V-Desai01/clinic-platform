@@ -11,7 +11,6 @@
 
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-import { createAppointmentMessage } from "@/features/messaging/actions"
 
 import {
   cancelAppointmentSchema,
@@ -351,11 +350,6 @@ export async function createAppointment(
     if (error) throw error
 
     // Queue WhatsApp appointment reminder — non-blocking
-    try {
-      await createAppointmentMessage({ appointmentId: (created as AppointmentRecord).id })
-    } catch (err) {
-      console.error("[createAppointment] Appointment message failed:", err)
-    }
 
     return { success: true, data: created as AppointmentRecord }
   } catch (err) {
