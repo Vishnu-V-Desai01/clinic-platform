@@ -1,16 +1,22 @@
-import { MessageSquare } from 'lucide-react'
-import { PageHeader } from '@/components/page-header'
-import { EmptyState } from '@/components/empty-state'
+import { getMessageClusters, getClinicMessageUsage } from "@/features/messaging/actions";
+import { RemindersClient } from "./reminders-client";
 
-export default function MessagesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function MessagesPage() {
+  const [clusters, usage] = await Promise.all([
+    getMessageClusters(),
+    getClinicMessageUsage(),
+  ]);
+
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title="Messages" />
-      <EmptyState
-        icon={MessageSquare}
-        title="Messages feature coming soon"
-        description="This page will be built in the Messages feature chat."
-      />
-    </div>
-  )
+    <RemindersClient
+      ready={clusters.ready}
+      scheduled={clusters.scheduled}
+      archive={clusters.archive}
+      messagesSent={usage.messages_sent}
+      includedLimit={usage.included_limit}
+      overageRatePaise={usage.overage_rate_paise}
+    />
+  );
 }
