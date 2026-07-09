@@ -1,7 +1,7 @@
 // src/features/analytics/actions.ts
 //
 // Doctor-only descriptive analytics (Chat 13) + predictive alerts data
-// layer (Chat 14, Step 1a). Several genuinely different things live here:
+// layer (Chat 14). Several genuinely different things live here:
 //   - getDoctorDashboardData: a LIVE query against appointments/payments/
 //     payment_collections/patients for whatever date range the doctor has
 //     selected. This is what the summary cards render — always accurate,
@@ -336,8 +336,8 @@ const ZERO_VARIANCE_Z_CAP = 5
 
 // CHAT 14 (Step 1a): appointments_no_show and revenue_collected added.
 // evaluateAnomaliesForDay below is generic over AnomalyMetricName, so no
-// other change to the detection logic itself is required — it will now
-// simply also run for these two.
+// other change to the detection logic itself was required for the two new
+// metrics to start being checked.
 const ANOMALY_METRICS: AnomalyMetricName[] = [
   'appointments_total',
   'appointments_cancelled',
@@ -422,6 +422,14 @@ async function upsertAnomalyAlert(
  * own trailing history, writing or clearing anomaly_alerts rows as
  * appropriate. Returns the metric names that triggered an alert this run
  * (for the caller to report back, e.g. "2 anomalies detected").
+ *
+ * CHAT 14 (Step 1e): each metric's iteration is now wrapped in its own
+ * try/catch. Previously a single metric throwing (e.g. the metric_name
+ * CHECK constraint rejecting an unrecognized value before its migration
+ * landed) silently aborted every metric after it in the ANOMALY_METRICS
+ * array — appointments_no_show and revenue_collected both went missing
+ * from a single failure on appointments_no_show. One metric failing now
+ * only skips that metric; every other metric still gets evaluated.
  */
 async function evaluateAnomaliesForDay(
   supabase: ReturnType<typeof createServerSupabaseClient>,
@@ -433,72 +441,78 @@ async function evaluateAnomaliesForDay(
   const triggered: AnomalyMetricName[] = []
 
   for (const metric of ANOMALY_METRICS) {
-    const { data, error } = await supabase
-      .from('daily_metrics')
-      .select(metric)
-      .eq('clinic_id', clinicId)
-      .eq('doctor_id', doctorId)
-      .lt('metric_date', targetDate)
-      .order('metric_date', { ascending: false })
-      .limit(ANOMALY_WINDOW_DAYS)
+    try {
+      const { data, error } = await supabase
+        .from('daily_metrics')
+        .select(metric)
+        .eq('clinic_id', clinicId)
+        .eq('doctor_id', doctorId)
+        .lt('metric_date', targetDate)
+        .order('metric_date', { ascending: false })
+        .limit(ANOMALY_WINDOW_DAYS)
 
-    if (error) throw error
+      if (error) throw error
 
-    const history = (data ?? []).map((row) => (row as Record<string, number>)[metric])
+      const history = (data ?? []).map((row) => (row as Record<string, number>)[metric])
 
-    if (history.length < ANOMALY_MIN_HISTORY_DAYS) {
-      // Not enough history to mean anything yet — a new clinic's first
-      // week shouldn't trigger false alarms against almost nothing.
-      await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
-      continue
-    }
-
-    const { mean, stddev } = computeStats(history)
-    const actual = todayValues[metric]
-
-    let zScore: number
-    let direction: AnomalyDirection
-
-    if (stddev < STDDEV_EPSILON) {
-      // The last N days were (near-)identical. If today matches too,
-      // there's nothing to flag. If today differs at all, that's a real
-      // break from a genuinely constant pattern — flag it, with the
-      // z-score capped rather than computed (dividing by ~0 would blow
-      // up into a meaningless huge or infinite number).
-      if (Math.abs(actual - mean) < STDDEV_EPSILON) {
+      if (history.length < ANOMALY_MIN_HISTORY_DAYS) {
+        // Not enough history to mean anything yet — a new clinic's first
+        // week shouldn't trigger false alarms against almost nothing.
         await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
         continue
       }
-      direction = actual > mean ? 'high' : 'low'
-      zScore = direction === 'high' ? ZERO_VARIANCE_Z_CAP : -ZERO_VARIANCE_Z_CAP
-    } else {
-      zScore = (actual - mean) / stddev
-      direction = zScore >= 0 ? 'high' : 'low'
+
+      const { mean, stddev } = computeStats(history)
+      const actual = todayValues[metric]
+
+      let zScore: number
+      let direction: AnomalyDirection
+
+      if (stddev < STDDEV_EPSILON) {
+        // The last N days were (near-)identical. If today matches too,
+        // there's nothing to flag. If today differs at all, that's a real
+        // break from a genuinely constant pattern — flag it, with the
+        // z-score capped rather than computed (dividing by ~0 would blow
+        // up into a meaningless huge or infinite number).
+        if (Math.abs(actual - mean) < STDDEV_EPSILON) {
+          await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
+          continue
+        }
+        direction = actual > mean ? 'high' : 'low'
+        zScore = direction === 'high' ? ZERO_VARIANCE_Z_CAP : -ZERO_VARIANCE_Z_CAP
+      } else {
+        zScore = (actual - mean) / stddev
+        direction = zScore >= 0 ? 'high' : 'low'
+      }
+
+      const absZ = Math.abs(zScore)
+
+      if (absZ < Z_WARNING) {
+        await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
+        continue
+      }
+
+      const severity = absZ >= Z_CRITICAL ? 'critical' : 'warning'
+
+      await upsertAnomalyAlert(supabase, {
+        clinic_id: clinicId,
+        doctor_id: doctorId,
+        alert_date: targetDate,
+        metric_name: metric,
+        actual_value: actual,
+        rolling_mean: mean,
+        rolling_stddev: stddev,
+        z_score: zScore,
+        direction,
+        severity,
+      })
+
+      triggered.push(metric)
+    } catch (metricErr) {
+      // Isolated per metric — one bad metric (constraint violation,
+      // transient DB error) no longer takes its siblings down with it.
+      console.error(`[evaluateAnomaliesForDay] Metric "${metric}" failed:`, metricErr)
     }
-
-    const absZ = Math.abs(zScore)
-
-    if (absZ < Z_WARNING) {
-      await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
-      continue
-    }
-
-    const severity = absZ >= Z_CRITICAL ? 'critical' : 'warning'
-
-    await upsertAnomalyAlert(supabase, {
-      clinic_id: clinicId,
-      doctor_id: doctorId,
-      alert_date: targetDate,
-      metric_name: metric,
-      actual_value: actual,
-      rolling_mean: mean,
-      rolling_stddev: stddev,
-      z_score: zScore,
-      direction,
-      severity,
-    })
-
-    triggered.push(metric)
   }
 
   return triggered
@@ -585,9 +599,6 @@ export async function runDailyRollup(
 
     const appointmentsTotal = apptRows.length
     const appointmentsCancelled = apptRows.filter((a) => a.status === 'cancelled').length
-    // CHAT 14 (Step 1a): pulled out as named locals (previously only
-    // computed inline inside the upsertDailyMetric call below) so they
-    // can also be passed into evaluateAnomaliesForDay's todayValues.
     const appointmentsNoShow = apptRows.filter((a) => a.status === 'no_show').length
     const revenueCollected = sum(collectionRows.map((c) => c.amount_collected))
 
@@ -615,7 +626,12 @@ export async function runDailyRollup(
     // Anomaly detection is a secondary enrichment on top of the metric
     // save above, not the primary contract of this function — a failure
     // here shouldn't make the whole rollup report as failed when the
-    // day's actual numbers saved just fine.
+    // day's actual numbers saved just fine. (This outer try/catch is a
+    // second layer on top of Step 1e's per-metric isolation inside
+    // evaluateAnomaliesForDay — that inner one keeps one bad metric from
+    // blocking its siblings; this outer one keeps the whole detection
+    // step, if it somehow throws before even reaching the loop, from
+    // blocking the metric save that already succeeded.)
     let alertsTriggered = 0
     try {
       const triggered = await evaluateAnomaliesForDay(supabase, profile.clinic_id, profile.id, targetDate, {
