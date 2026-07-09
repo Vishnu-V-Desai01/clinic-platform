@@ -2,26 +2,31 @@
 
 export const dynamic = 'force-dynamic';
 
-import { getOrCreateProfile } from '@/lib/supabase/profile';
+import { requireRole } from '@/lib/supabase/profile';
 import {
   getPendingApprovalPayments,
   getActivePatientsForCharge,
 } from '@/features/payments/actions';
+import { listDoctors } from '@/features/appointments/actions';
 import ChargeApprovalsClient from '@/features/payments/components/charge-approvals-client';
 
 export default async function ChargeApprovalsPage() {
-  const profile = await getOrCreateProfile();
+  const profile = await requireRole('doctor', 'staff');
 
-  const [charges, patients] = await Promise.all([
+  const [charges, patients, doctorsResult] = await Promise.all([
     getPendingApprovalPayments(),
     getActivePatientsForCharge(),
+    listDoctors(),
   ]);
+
+  const doctorOptions = doctorsResult.success ? doctorsResult.data : [];
 
   return (
     <ChargeApprovalsClient
       charges={charges}
       patients={patients}
-      userRole={(profile?.role as 'doctor' | 'staff' | 'patient') || 'patient'}
+      doctorOptions={doctorOptions}
+      userRole={profile.role}
     />
   );
 }

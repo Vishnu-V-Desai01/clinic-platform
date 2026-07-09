@@ -18,6 +18,7 @@ import { Plus } from 'lucide-react';
 import { setAmountAndApprovePayment, approvePayment } from '../actions';
 import NewChargeDialog from './new-charge-dialog-client';
 import type { PendingChargeView, PatientPickerItem } from '../types';
+import type { DoctorOption } from '@/features/appointments/types';
 
 function formatINR(paise: number): string {
   return (
@@ -62,12 +63,14 @@ function formatDate(dateStr: string): string {
 interface ChargeApprovalsClientProps {
   charges: PendingChargeView[];
   patients: PatientPickerItem[];
+  doctorOptions: DoctorOption[];
   userRole: 'doctor' | 'staff' | 'patient';
 }
 
 export default function ChargeApprovalsClient({
   charges,
   patients,
+  doctorOptions,
   userRole,
 }: ChargeApprovalsClientProps) {
   const router = useRouter();
@@ -239,6 +242,9 @@ export default function ChargeApprovalsClient({
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {charge.patientMrn}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Dr. {charge.doctorName}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
                         {formatDate(charge.date)}
@@ -457,6 +463,8 @@ export default function ChargeApprovalsClient({
         open={newChargeOpen}
         onOpenChange={setNewChargeOpen}
         patients={patients}
+        role={userRole}
+        doctorOptions={doctorOptions}
       />
     </div>
   );

@@ -1,16 +1,20 @@
 // src/features/appointments/actions.ts
 //
-// All appointment operations live here. Every function:
-//   1. Authorises the caller via requireRole
-//   2. Validates input with Zod
-//   3. Queries Supabase (RLS enforced at DB level)
-//
-// clinic_id always comes from the authenticated profile — never from the form.
+// FIX (this chat): requireRole() signals an unauthorized caller by calling
+// Next's redirect(), which works by throwing a special error that Next.js
+// must see un-caught to actually perform the navigation. Every function
+// below used to call requireRole() as the first line INSIDE its try/catch,
+// which silently swallowed that redirect and returned a generic "Failed
+// to..." error instead of sending the user home. No unsafe write ever
+// happened (the function still exits before reaching the database), but
+// the error message was actively wrong about why. Fix: requireRole() now
+// runs before each try block, so failures propagate as a real redirect.
 
 "use server"
 
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAppointmentMessage } from "@/features/messaging/actions"
 
 import {
   cancelAppointmentSchema,
@@ -152,8 +156,9 @@ async function checkDoubleBooking(
 }
 
 export async function listDoctors(): Promise<Result<DoctorOption[]>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -185,8 +190,9 @@ export async function listAppointments(filters?: {
   dateFrom?:  string
   dateTo?:    string
 }): Promise<Result<AppointmentListItem[]>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     let query = supabase
@@ -251,8 +257,9 @@ export async function listAppointments(filters?: {
 export async function getAppointmentById(
   appointmentId: string,
 ): Promise<Result<AppointmentDetail>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -313,9 +320,9 @@ export async function getAppointmentById(
 export async function createAppointment(
   input: Record<string, unknown>,
 ): Promise<Result<AppointmentRecord>> {
-  try {
-    const profile = await requireRole("doctor", "staff")
+  const profile = await requireRole("doctor", "staff")
 
+  try {
     const parsed = createAppointmentSchema.safeParse(input)
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message ?? "Please check the form and try again."
@@ -350,6 +357,11 @@ export async function createAppointment(
     if (error) throw error
 
     // Queue WhatsApp appointment reminder — non-blocking
+    try {
+      await createAppointmentMessage({ appointmentId: (created as AppointmentRecord).id })
+    } catch (err) {
+      console.error("[createAppointment] Appointment message failed:", err)
+    }
 
     return { success: true, data: created as AppointmentRecord }
   } catch (err) {
@@ -362,9 +374,9 @@ export async function rescheduleAppointment(
   appointmentId: string,
   input: Record<string, unknown>,
 ): Promise<Result<AppointmentRecord>> {
-  try {
-    const profile = await requireRole("doctor", "staff")
+  const profile = await requireRole("doctor", "staff")
 
+  try {
     const parsed = rescheduleAppointmentSchema.safeParse(input)
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message ?? "Please check the form and try again."
@@ -422,9 +434,9 @@ export async function cancelAppointment(
   appointmentId: string,
   input?: Record<string, unknown>,
 ): Promise<Result<void>> {
-  try {
-    const profile = await requireRole("doctor", "staff")
+  const profile = await requireRole("doctor", "staff")
 
+  try {
     let cancelData: CancelAppointmentData | undefined
     if (input) {
       const parsed = cancelAppointmentSchema.safeParse(input)
@@ -477,9 +489,9 @@ export async function updateAppointmentStatus(
   appointmentId: string,
   input: Record<string, unknown>,
 ): Promise<Result<AppointmentRecord>> {
-  try {
-    const profile = await requireRole("doctor")
+  const profile = await requireRole("doctor")
 
+  try {
     const parsed = updateAppointmentStatusSchema.safeParse(input)
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message ?? "Please check the form and try again."

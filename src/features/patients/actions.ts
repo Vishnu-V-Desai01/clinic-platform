@@ -1,21 +1,13 @@
 // src/features/patients/actions.ts
-//
-// All patient CRUD lives here. Every function:
-//   1. Authorises the caller via requireRole (app-level guard)
-//   2. Validates input with Zod (server-level guard)
-//   3. Queries Supabase (database-level guard via RLS)
-//
-// The clinic_id always comes from the authenticated profile — never from
-// the form — so a caller can never write into a different clinic.
-
 "use server"
-
+import { after } from "next/server"
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { patientFormSchema } from "./schema"
 import type { PatientFormData } from "./schema"
 import { calculateAge } from "./types"
 import type { PatientListItem, PatientRecord } from "./types"
+import { createRegistrationMessage } from "@/features/messaging/actions"
 
 type Result<T> =
   | { success: true; data: T }
@@ -36,6 +28,7 @@ function toDbRow(data: PatientFormData, clinicId: string) {
     city:                           data.city,
     state:                          data.state,
     postal_code:                    data.pincode,
+    language_preference:            data.languagePreference,
     emergency_contact_name:         data.emergencyName,
     emergency_contact_phone:        data.emergencyPhone,
     emergency_contact_relationship: data.emergencyRelationship,
@@ -116,8 +109,25 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
       return { success: false, error: message }
     }
 
+    // A doctor registering a patient can only ever assign that patient to
+    // themselves — the client's value is ignored entirely for that role,
+    // so there's no way to tamper with the request to assign someone else.
+    // Staff must explicitly choose a doctor.
+    let assignedDoctorId: string | null
+    if (profile.role === "doctor") {
+      assignedDoctorId = profile.id
+    } else {
+      assignedDoctorId = parsed.data.assignedDoctorId
+      if (!assignedDoctorId) {
+        return { success: false, error: "Please assign a doctor for this patient." }
+      }
+    }
+
     const supabase = createServerSupabaseClient()
-    const row      = toDbRow(parsed.data, profile.clinic_id)
+    const row = {
+      ...toDbRow(parsed.data, profile.clinic_id),
+      assigned_doctor_id: assignedDoctorId,
+    }
 
     const { data, error } = await supabase
       .from("patients")
@@ -127,7 +137,15 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
 
     if (error) throw error
 
-    // Queue WhatsApp registration message — non-blocking, failure does not affect patient creation
+    // Queue WhatsApp registration message after response is sent — truly non-blocking
+    const patientId = (data as PatientRecord).id
+    after(async () => {
+      try {
+        await createRegistrationMessage({ patientId })
+      } catch (err) {
+        console.error("[createPatient] Registration message failed:", err)
+      }
+    })
 
     return { success: true, data: data as PatientRecord }
   } catch (err) {
@@ -150,12 +168,26 @@ export async function updatePatient(
       return { success: false, error: message }
     }
 
+    if (profile.role === "staff" && !parsed.data.assignedDoctorId) {
+      return { success: false, error: "Please assign a doctor for this patient." }
+    }
+
     const supabase = createServerSupabaseClient()
 
-    const { clinic_id: _clinicId, ...updateRow } = toDbRow(
+    const { clinic_id: _clinicId, ...baseUpdateRow } = toDbRow(
       parsed.data,
       profile.clinic_id,
     )
+
+    // Only staff can change who a patient is assigned to. A doctor editing
+    // a patient — who may not even be their own, since every doctor can
+    // currently see and edit every clinic patient — must never silently
+    // reassign them, so the field is simply left out of the update when
+    // the caller is a doctor.
+    const updateRow =
+      profile.role === "staff"
+        ? { ...baseUpdateRow, assigned_doctor_id: parsed.data.assignedDoctorId }
+        : baseUpdateRow
 
     const { data, error } = await supabase
       .from("patients")

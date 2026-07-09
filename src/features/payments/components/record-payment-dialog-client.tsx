@@ -25,12 +25,15 @@ import {
 import { cn } from '@/lib/utils';
 import { recordPaymentCollection } from '../actions';
 import type { ApprovedChargeView } from '../types';
+import type { DoctorOption } from '@/features/appointments/types';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   approvedCharges: ApprovedChargeView[];
   defaultChargeId?: string | null;
+  role: 'doctor' | 'staff';
+  doctorOptions: DoctorOption[];
 }
 
 function formatINR(paise: number): string {
@@ -57,19 +60,22 @@ export default function RecordPaymentDialog({
   onOpenChange,
   approvedCharges,
   defaultChargeId = null,
+  role,
+  doctorOptions,
 }: Props) {
   const router = useRouter();
 
   const [chargeId, setChargeId]               = useState('');
-  const [amount, setAmount]                   = useState('');
-  const [mode, setMode]                       = useState('');
-  const [date, setDate]                       = useState(getTodayDateString());
-  const [reference, setReference]             = useState('');
-  const [notes, setNotes]                     = useState('');
-  const [isComboOpen, setIsComboOpen]         = useState(false);
-  const [isLoading, setIsLoading]             = useState(false);
-  const [errorMessage, setErrorMessage]       = useState<string | null>(null);
-  const [searchTerm, setSearchTerm]           = useState('');
+  const [doctorId, setDoctorId]                = useState('');
+  const [amount, setAmount]                    = useState('');
+  const [mode, setMode]                        = useState('');
+  const [date, setDate]                        = useState(getTodayDateString());
+  const [reference, setReference]              = useState('');
+  const [notes, setNotes]                      = useState('');
+  const [isComboOpen, setIsComboOpen]          = useState(false);
+  const [isLoading, setIsLoading]              = useState(false);
+  const [errorMessage, setErrorMessage]        = useState<string | null>(null);
+  const [searchTerm, setSearchTerm]            = useState('');
 
   useEffect(() => {
     if (open && defaultChargeId) setChargeId(defaultChargeId);
@@ -77,6 +83,7 @@ export default function RecordPaymentDialog({
 
   const resetForm = () => {
     setChargeId('');
+    setDoctorId('');
     setAmount('');
     setMode('');
     setDate(getTodayDateString());
@@ -114,7 +121,9 @@ export default function RecordPaymentDialog({
     );
   }, [approvedCharges, searchTerm]);
 
-  const isValid = chargeId && amount && mode && date;
+  const isValid = Boolean(
+    chargeId && amount && mode && date && (role !== 'staff' || doctorId)
+  );
 
   const handleSubmit = async () => {
     if (!isValid || !selectedCharge) return;
@@ -134,6 +143,7 @@ export default function RecordPaymentDialog({
     try {
       const result = await recordPaymentCollection({
         payment_id: chargeId,
+        doctor_id: doctorId || null,
         amount_collected: amountPaise / 100,
         collection_date: new Date(date),
         payment_method: mode as
@@ -251,6 +261,25 @@ export default function RecordPaymentDialog({
               </p>
             )}
           </div>
+
+          {/* Doctor selector — staff only */}
+          {role === 'staff' && (
+            <div className="space-y-2">
+              <Label htmlFor="collection-doctor">
+                Doctor <span className="text-destructive">*</span>
+              </Label>
+              <Select value={doctorId} onValueChange={setDoctorId}>
+                <SelectTrigger id="collection-doctor" className="w-full">
+                  <SelectValue placeholder="Select doctor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {doctorOptions.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Amount */}
           <div className="space-y-2">

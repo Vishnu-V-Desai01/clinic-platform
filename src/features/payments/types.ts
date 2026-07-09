@@ -5,6 +5,7 @@ export type Payment = {
   clinic_id: string;
   patient_id: string;
   appointment_id: string | null;
+  doctor_id: string | null;
   description: string | null;
   amount_charged: number;
   amount_paid: number;
@@ -25,6 +26,7 @@ export type PaymentCollection = {
   id: string;
   clinic_id: string;
   payment_id: string;
+  doctor_id: string | null;
   amount_collected: number;
   collection_date: string;
   payment_method: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'check' | 'other';
@@ -104,6 +106,7 @@ export type PendingChargeView = {
   id: string;
   patientName: string;
   patientMrn: string;
+  doctorName: string;
   service: string;
   date: string;
   proposedAmountPaise: number;

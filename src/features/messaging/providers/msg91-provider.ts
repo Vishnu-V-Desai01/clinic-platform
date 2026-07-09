@@ -62,6 +62,14 @@ export class Msg91MessageProvider implements MessageProvider {
       },
     };
 
+    console.log("[MSG91] Sending template:", {
+      templateName: params.templateName,
+      languageCode: params.languageCode,
+      bodyParams: params.bodyParams,
+      phone: params.phone,
+      requestBody: JSON.stringify(requestBody, null, 2),
+    });
+
     try {
       const response = await fetch(MSG91_ENDPOINT, {
         method: "POST",
@@ -73,6 +81,12 @@ export class Msg91MessageProvider implements MessageProvider {
       });
 
       const data: unknown = await response.json().catch(() => null);
+
+      console.log("[MSG91] Response:", {
+        status: response.status,
+        ok: response.ok,
+        data: data,
+      });
 
       if (!response.ok) {
         return {

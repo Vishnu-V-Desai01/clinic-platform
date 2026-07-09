@@ -35,6 +35,7 @@ import type {
   PatientPickerItem,
   PaymentDisplayStatus,
 } from '../types';
+import type { DoctorOption } from '@/features/appointments/types';
 
 const formatINR = (paise: number): string => {
   const rupees = paise / 100;
@@ -89,6 +90,7 @@ interface PaymentsDashboardClientProps {
   byMode: PaymentDashboardByMode;
   approvedCharges: ApprovedChargeView[];
   patients: PatientPickerItem[];
+  doctorOptions: DoctorOption[];
   userRole: 'doctor' | 'staff' | 'patient';
 }
 
@@ -98,6 +100,7 @@ export default function PaymentsDashboardClient({
   byMode,
   approvedCharges,
   patients,
+  doctorOptions,
   userRole,
 }: PaymentsDashboardClientProps) {
   const router = useRouter();
@@ -472,12 +475,16 @@ export default function PaymentsDashboardClient({
         onOpenChange={setRecordDialogOpen}
         approvedCharges={approvedCharges}
         defaultChargeId={preselectedChargeId}
+        role={userRole}
+        doctorOptions={doctorOptions}
       />
 
       <NewChargeDialog
         open={newChargeOpen}
         onOpenChange={setNewChargeOpen}
         patients={patients}
+        role={userRole}
+        doctorOptions={doctorOptions}
       />
     </div>
   );

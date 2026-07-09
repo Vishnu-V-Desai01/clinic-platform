@@ -14,12 +14,15 @@ export type PatientStatus = "active" | "inactive" | "archived"
 export type BloodGroup =
   | "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-"
 
+export type LanguagePreference = "en" | "hi" | "ta" | "gu" | "kn"
+
 /* ------------------------- Database row (snake_case) --------------------- */
 // Mirrors the `patients` table exactly. This is what a SELECT returns.
 
 export interface PatientRecord {
   id: string
   clinic_id: string
+  assigned_doctor_id: string | null // which doctor's dashboard/panel this patient belongs to
   first_name: string
   last_name: string
   date_of_birth: string | null // "YYYY-MM-DD"
@@ -30,6 +33,7 @@ export interface PatientRecord {
   city: string | null
   state: string | null
   postal_code: string | null
+  language_preference: LanguagePreference | null
   emergency_contact_name: string | null
   emergency_contact_phone: string | null
   emergency_contact_relationship: string | null
@@ -56,12 +60,14 @@ export interface PatientFormValues {
   bloodGroup: BloodGroup | ""
   mrn: string
   status: PatientStatus
+  assignedDoctorId: string // "" = unset. Ignored for role "doctor", required for "staff".
   phone: string
   email: string
   addressLine: string
   city: string
   state: string
   pincode: string
+  languagePreference: LanguagePreference
   emergencyName: string
   emergencyRelationship: string
   emergencyPhone: string

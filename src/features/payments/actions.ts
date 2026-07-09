@@ -30,6 +30,7 @@ import type {
   PaymentLineItem,
 } from './types';
 import { generateAndStorePaymentDocuments } from './document-storage';
+import { createReceiptMessage } from '@/features/messaging/actions';
 import type { z } from 'zod';
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -49,6 +50,20 @@ function descriptionFromLineItems(items: Array<{ description: string }>): string
   if (items.length === 0) return 'Charge';
   if (items.length === 1) return items[0].description;
   return items[0].description + ' (and ' + (items.length - 1) + ' more)';
+}
+
+// A doctor submitting can only ever attribute the row to themselves — the
+// client's value is ignored entirely for that role, so there's no way to
+// tamper with the request to attribute someone else's work. Staff must
+// explicitly choose a doctor. Same rule, used for both charge creation
+// and payment collection.
+function resolveDoctorId(
+  profile: { id: string; role: string },
+  submittedDoctorId: string | null | undefined,
+): { doctorId: string } | { error: string } {
+  if (profile.role === 'doctor') return { doctorId: profile.id };
+  if (submittedDoctorId) return { doctorId: submittedDoctorId };
+  return { error: 'Please select a doctor.' };
 }
 
 // ── Read functions ────────────────────────────────────────────────────────────
@@ -181,6 +196,7 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
       created_at,
       patients (first_name, last_name, patient_id_number),
       appointments (appointment_date),
+      profiles!payments_doctor_id_fkey (full_name),
       payment_line_items (id, description, quantity, unit_price, total_price, sort_order)
     `
     )
@@ -201,6 +217,7 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
       id: row.id,
       patientName: patientFullName(row.patients),
       patientMrn: row.patients?.patient_id_number || 'N/A',
+      doctorName: row.profiles?.full_name || 'Unassigned',
       service: row.description || 'Charge',
       date: row.appointments?.appointment_date || row.created_at,
       proposedAmountPaise: Math.round((row.amount_charged || 0) * 100),
@@ -614,12 +631,16 @@ export async function createManualCharge(
     const v = CreateManualChargeSchema.parse(input);
     const description = descriptionFromLineItems(v.line_items);
 
+    const doctorResult = resolveDoctorId(profile, v.doctor_id);
+    if ('error' in doctorResult) return { success: false, error: doctorResult.error };
+
     const { data: newPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
         clinic_id: profile.clinic_id,
         patient_id: v.patient_id,
         appointment_id: null,
+        doctor_id: doctorResult.doctorId,
         description,
         amount_charged: v.line_items.reduce(
           (sum, item) => sum + item.quantity * item.unit_price, 0
@@ -677,6 +698,9 @@ export async function createManualChargeAndApprove(
     const v = CreateManualChargeSchema.parse(input);
     const description = descriptionFromLineItems(v.line_items);
 
+    const doctorResult = resolveDoctorId(profile, v.doctor_id);
+    if ('error' in doctorResult) return { success: false, error: doctorResult.error };
+
     const { data: receiptNumber, error: receiptError } = await supabase
       .rpc('next_receipt_number', { p_clinic_id: profile.clinic_id });
 
@@ -691,6 +715,7 @@ export async function createManualChargeAndApprove(
         clinic_id: profile.clinic_id,
         patient_id: v.patient_id,
         appointment_id: null,
+        doctor_id: doctorResult.doctorId,
         description,
         amount_charged: v.line_items.reduce(
           (sum, item) => sum + item.quantity * item.unit_price, 0
@@ -733,6 +758,13 @@ export async function createManualChargeAndApprove(
       await generateAndStorePaymentDocuments(newPayment.id);
     } catch (docError) {
       console.error('[createManualChargeAndApprove] Doc generation failed:', docError);
+    }
+
+    // Queue WhatsApp receipt message — non-blocking
+    try {
+      await createReceiptMessage({ paymentId: newPayment.id });
+    } catch (err) {
+      console.error('[createManualChargeAndApprove] Receipt message failed:', err);
     }
 
     revalidatePath('/dashboard/payments');
@@ -819,6 +851,13 @@ export async function setAmountAndApprovePayment(
       console.error('[setAmountAndApprovePayment] Doc generation failed:', docError);
     }
 
+    // Queue WhatsApp receipt message — non-blocking
+    try {
+      await createReceiptMessage({ paymentId: v.payment_id });
+    } catch (err) {
+      console.error('[setAmountAndApprovePayment] Receipt message failed:', err);
+    }
+
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
     return { success: true, payment_id: v.payment_id };
@@ -891,6 +930,13 @@ export async function approvePayment(
         await generateAndStorePaymentDocuments(v.payment_id);
       } catch (docError) {
         console.error('[approvePayment] Doc generation failed:', docError);
+      }
+
+      // Queue WhatsApp receipt message — non-blocking
+      try {
+        await createReceiptMessage({ paymentId: v.payment_id });
+      } catch (err) {
+        console.error('[approvePayment] Receipt message failed:', err);
       }
     }
 
@@ -983,11 +1029,15 @@ export async function recordPaymentCollection(
       };
     }
 
+    const doctorResult = resolveDoctorId(profile, v.doctor_id);
+    if ('error' in doctorResult) return { success: false, error: doctorResult.error };
+
     const { data, error } = await supabase
       .from('payment_collections')
       .insert({
         clinic_id: profile.clinic_id,
         payment_id: v.payment_id,
+        doctor_id: doctorResult.doctorId,
         amount_collected: v.amount_collected,
         collection_date: v.collection_date.toISOString(),
         payment_method: v.payment_method,

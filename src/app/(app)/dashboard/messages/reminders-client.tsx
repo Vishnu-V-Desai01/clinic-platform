@@ -129,7 +129,7 @@ export function RemindersClient({
   };
 
   return (
-    <div className="space-y-8 p-6 md:p-8 max-w-7xl mx-auto">
+    <div className="space-y-8 p-6 md:p-10 max-w-[1600px] mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-2xl font-semibold text-foreground">WhatsApp Reminders</h1>
@@ -158,8 +158,8 @@ export function RemindersClient({
         </div>
       )}
 
-      {/* Two-column grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* Two-column grid — widened */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
 
         {/* Section 1: Ready to Send */}
         <div className="space-y-4">
@@ -181,7 +181,7 @@ export function RemindersClient({
 
           <div className="space-y-3">
             {ready.length === 0 ? (
-              <Card className="p-8 flex flex-col items-center justify-center text-center gap-3">
+              <Card className="p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
                 <Check className="w-10 h-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">No messages ready to send.</p>
               </Card>
@@ -189,7 +189,7 @@ export function RemindersClient({
               ready.map((msg) => (
                 <Card
                   key={msg.id}
-                  className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                  className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                 >
                   <div className="flex-1 space-y-2 min-w-0">
                     <p className="font-medium text-foreground truncate">{msg.patientName}</p>
@@ -239,7 +239,7 @@ export function RemindersClient({
 
           <div className="space-y-3">
             {scheduled.length === 0 ? (
-              <Card className="p-8 flex flex-col items-center justify-center text-center gap-3">
+              <Card className="p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
                 <CalendarClock className="w-10 h-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
                   No appointment reminders scheduled.
@@ -249,7 +249,7 @@ export function RemindersClient({
               scheduled.map((reminder) => (
                 <Card
                   key={reminder.id}
-                  className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                  className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                 >
                   <div className="flex-1 space-y-2 min-w-0">
                     <p className="font-medium text-foreground truncate">{reminder.patientName}</p>

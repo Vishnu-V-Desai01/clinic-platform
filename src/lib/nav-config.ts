@@ -9,6 +9,7 @@ import {
   MessageSquare,
   ClipboardCheck,
   Settings,
+  BarChart3,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/profile'
 
@@ -22,6 +23,7 @@ export type NavItem = {
 export const navByRole: Record<Role, NavItem[]> = {
   doctor: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { title: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
     { title: 'Patients', href: '/dashboard/patients', icon: Users },
     { title: 'Appointments', href: '/dashboard/appointments', icon: Calendar },
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },

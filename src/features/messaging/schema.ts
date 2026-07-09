@@ -104,7 +104,6 @@ export const registrationPlaceholdersSchema = z.object({
   CLINIC_NAME: z.string(),
   PATIENT_NAME: z.string(),
   EMAIL: z.string(),
-  DEFAULT_PASSWORD: z.string(),
   LOGIN_LINK: z.string(),
 });
 

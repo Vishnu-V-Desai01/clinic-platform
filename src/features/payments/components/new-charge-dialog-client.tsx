@@ -18,9 +18,13 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput,
   CommandItem, CommandList,
 } from '@/components/ui/command';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { createManualCharge, createManualChargeAndApprove } from '../actions';
 import type { PatientPickerItem } from '../types';
+import type { DoctorOption } from '@/features/appointments/types';
 
 interface LineItemRow {
   key: string;
@@ -36,6 +40,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patients: PatientPickerItem[];
+  role: 'doctor' | 'staff';
+  doctorOptions: DoctorOption[];
 }
 
 function fmt(rupees: number): string {
@@ -48,10 +54,11 @@ function fmt(rupees: number): string {
   );
 }
 
-export default function NewChargeDialog({ open, onOpenChange, patients }: Props) {
+export default function NewChargeDialog({ open, onOpenChange, patients, role, doctorOptions }: Props) {
   const router = useRouter();
 
   const [patientId, setPatientId]   = useState('');
+  const [doctorId, setDoctorId]     = useState('');
   const [comboOpen, setComboOpen]   = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [lineItems, setLineItems]   = useState<LineItemRow[]>([
@@ -63,6 +70,7 @@ export default function NewChargeDialog({ open, onOpenChange, patients }: Props)
 
   const reset = () => {
     setPatientId('');
+    setDoctorId('');
     setLineItems([{ key: newKey(), description: '', quantity: '1', unitPrice: '' }]);
     setNote('');
     setError(null);
@@ -109,7 +117,10 @@ export default function NewChargeDialog({ open, onOpenChange, patients }: Props)
     [validItems]
   );
 
-  const isValid = patientId.length > 0 && validItems.length > 0;
+  const isValid =
+    patientId.length > 0 &&
+    validItems.length > 0 &&
+    (role !== 'staff' || doctorId.length > 0);
 
   const update = (key: string, field: keyof Omit<LineItemRow, 'key'>, value: string) =>
     setLineItems((prev) =>
@@ -136,6 +147,7 @@ export default function NewChargeDialog({ open, onOpenChange, patients }: Props)
       const action = mode === 'approve' ? createManualChargeAndApprove : createManualCharge;
       const result = await action({
         patient_id: patientId,
+        doctor_id: doctorId || null,
         line_items: validItems.map((item) => ({
           description: item.description.trim(),
           quantity:    parseInt(item.quantity),
@@ -245,6 +257,25 @@ export default function NewChargeDialog({ open, onOpenChange, patients }: Props)
               </PopoverContent>
             </Popover>
           </div>
+
+          {/* Doctor picker — staff only */}
+          {role === 'staff' && (
+            <div className="space-y-2">
+              <Label htmlFor="charge-doctor">
+                Doctor <span className="text-destructive">*</span>
+              </Label>
+              <Select value={doctorId} onValueChange={setDoctorId}>
+                <SelectTrigger id="charge-doctor" className="w-full">
+                  <SelectValue placeholder="Select doctor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {doctorOptions.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Line items */}
           <div className="space-y-3">

@@ -1,7 +1,7 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
-import { clerkClient } from "@clerk/nextjs/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/profile";
 import { generateAndStorePaymentDocuments } from "@/features/payments/document-storage";
@@ -27,12 +27,56 @@ import type {
 } from "./types";
 import { getMessageProvider } from "./providers";
 import { buildBodyParams, getProviderTemplateName } from "./provider-mapping";
-import { generateDefaultPassword, getLocalTimeAsUtc } from "./utils";
+import { getLocalTimeAsUtc } from "./utils";
 import {
   getOrCreateActivePublicLink,
   regenerateDocumentLink,
   buildPublicDocumentUrl,
 } from "./document-links";
+export type ReadyMessage = {
+  id: string;
+  patientName: string;
+  phone: string;
+  type: "registration" | "receipt";
+  language: string;
+  status: string;
+  createdAt: string;
+};
+
+export type ScheduledReminder = {
+  id: string;
+  patientName: string;
+  doctorName: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  scheduledSendTime: string;
+  status: string;
+};
+
+export type ArchiveMessage = {
+  id: string;
+  patientName: string;
+  messageType: string;
+  status: "sent" | "failed" | "cancelled" | "expired";
+  timestamp: string;
+  failureReason: string | null;
+};
+
+// Country code mapping for phone number formatting
+const COUNTRY_CODE_MAP: Record<string, string> = {
+  'IN': '91',
+  'US': '1',
+  'GB': '44',
+  'AE': '971',
+  'SA': '966',
+  'AU': '61',
+  'NZ': '64',
+};
+
+function formatPhoneWithCountryCode(phone: string, countryCode: string): string {
+  const code = COUNTRY_CODE_MAP[countryCode] || '91';
+  return phone.startsWith(code) ? phone : `${code}${phone}`;
+}
 
 // ============================================================================
 // createRegistrationMessage
@@ -65,16 +109,16 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
   }
 
   if (!patient.phone) {
-    return { success: false, error: "Patient has no phone number on file — cannot send WhatsApp reminders" };
+    return { success: false, error: "Patient has no phone number on file" };
   }
 
   if (!patient.email) {
-    return { success: false, error: "Patient has no email on file — required to create a login account" };
+    return { success: false, error: "Patient has no email on file" };
   }
 
   const { data: clinic, error: clinicError } = await supabase
     .from("clinics")
-    .select("id, name")
+    .select("id, name, country_code")
     .eq("id", patient.clinic_id)
     .single();
 
@@ -82,26 +126,15 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
     return { success: false, error: "Clinic not found" };
   }
 
-  const defaultPassword = generateDefaultPassword(patient.email, patient.phone);
-
-  try {
-    const client = await clerkClient();
-    await client.users.createUser({
-      emailAddress: [patient.email],
-      password: defaultPassword,
-      firstName: patient.first_name,
-      lastName: patient.last_name,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Clerk error";
-    return { success: false, error: `Failed to create patient login account: ${message}` };
-  }
+  const phoneWithCountryCode = formatPhoneWithCountryCode(
+    patient.phone,
+    clinic.country_code || 'IN'
+  );
 
   const placeholders: RegistrationPlaceholders = {
     CLINIC_NAME: clinic.name,
     PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
     EMAIL: patient.email,
-    DEFAULT_PASSWORD: defaultPassword,
     LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient/login`,
   };
 
@@ -112,7 +145,7 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
       patient_id: patient.id,
       type: "registration",
       language: patient.language_preference,
-      phone: patient.phone,
+      phone: phoneWithCountryCode,
       placeholders,
       status: "pending",
       scheduled_send_time: new Date().toISOString(),
@@ -180,18 +213,23 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
   }
 
   if (!patient.phone) {
-    return { success: false, error: "Patient has no phone number on file — cannot send WhatsApp reminders" };
+    return { success: false, error: "Patient has no phone number on file" };
   }
 
   const { data: clinic, error: clinicError } = await supabase
     .from("clinics")
-    .select("id, name, phone, timezone")
+    .select("id, name, phone, timezone, country_code")
     .eq("id", appointment.clinic_id)
     .single();
 
   if (clinicError || !clinic) {
     return { success: false, error: "Clinic not found" };
   }
+
+  const phoneWithCountryCode = formatPhoneWithCountryCode(
+    patient.phone,
+    clinic.country_code || 'IN'
+  );
 
   const { data: doctorProfile } = await supabase
     .from("profiles")
@@ -236,7 +274,7 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
       appointment_id: appointment.id,
       type: "appointment",
       language: patient.language_preference,
-      phone: patient.phone,
+      phone: phoneWithCountryCode,
       placeholders,
       status: "pending",
       scheduled_send_time: scheduledSendTime.toISOString(),
@@ -306,18 +344,23 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
   }
 
   if (!patient.phone) {
-    return { success: false, error: "Patient has no phone number on file — cannot send WhatsApp reminders" };
+    return { success: false, error: "Patient has no phone number on file" };
   }
 
   const { data: clinic, error: clinicError } = await supabase
     .from("clinics")
-    .select("id, name")
+    .select("id, name, country_code")
     .eq("id", payment.clinic_id)
     .single();
 
   if (clinicError || !clinic) {
     return { success: false, error: "Clinic not found" };
   }
+
+  const phoneWithCountryCode = formatPhoneWithCountryCode(
+    patient.phone,
+    clinic.country_code || 'IN'
+  );
 
   await generateAndStorePaymentDocuments(paymentId);
 
@@ -361,7 +404,7 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
       payment_id: payment.id,
       type: "receipt",
       language: patient.language_preference,
-      phone: patient.phone,
+      phone: phoneWithCountryCode,
       placeholders,
       status: "pending",
       scheduled_send_time: new Date().toISOString(),
@@ -660,38 +703,7 @@ export async function expireOverdueAppointmentMessages() {
 }
 
 // ============================================================================
-// Cluster types — used by the WhatsApp Reminders page
-// ============================================================================
-export type ReadyMessage = {
-  id: string;
-  patientName: string;
-  type: "registration" | "receipt";
-  phone: string;
-  language: string;
-};
-
-export type ScheduledReminder = {
-  id: string;
-  patientName: string;
-  doctorName: string;
-  appointmentDate: string;
-  appointmentTime: string;
-};
-
-export type ArchiveMessage = {
-  id: string;
-  patientName: string;
-  messageType: string;
-  status: "sent" | "failed" | "cancelled" | "expired";
-  timestamp: string;
-};
-
-// ============================================================================
-// getMessageClusters — fetches all three clusters in one call. Runs
-// expireOverdueAppointmentMessages first so the scheduled cluster is always
-// accurate when the page loads — no separate cron job needed.
-// All data needed for display is already stored in placeholders JSONB, so
-// no JOINs are required; RLS handles clinic scoping automatically.
+// getMessageClusters
 // ============================================================================
 export async function getMessageClusters(): Promise<{
   ready: ReadyMessage[];
@@ -699,77 +711,69 @@ export async function getMessageClusters(): Promise<{
   archive: ArchiveMessage[];
 }> {
   await requireRole("doctor", "staff");
+  const supabase = createServerSupabaseClient();
+  const profile = await requireRole("doctor", "staff");
+
+  // Expire overdue appointment messages first
   await expireOverdueAppointmentMessages();
 
-  const supabase = createServerSupabaseClient();
-
-  const [readyResult, scheduledResult, archiveResult] = await Promise.all([
+  // Fetch all three clusters in parallel
+  const [readyData, scheduledData, archiveData] = await Promise.all([
     supabase
       .from("message_queue")
-      .select("id, type, phone, language, placeholders")
-      .in("type", ["registration", "receipt"])
+      .select("*")
+      .eq("clinic_id", profile.clinic_id)
       .eq("status", "pending")
+      .neq("type", "appointment")
       .order("created_at", { ascending: true }),
     supabase
       .from("message_queue")
-      .select("id, placeholders")
-      .eq("type", "appointment")
+      .select("*")
+      .eq("clinic_id", profile.clinic_id)
       .eq("status", "pending")
-      .order("expires_at", { ascending: true }),
+      .eq("type", "appointment")
+      .gte("scheduled_send_time", new Date().toISOString())
+      .order("scheduled_send_time", { ascending: true }),
     supabase
       .from("message_queue")
-      .select("id, type, status, placeholders, sent_at, cancelled_at, updated_at")
+      .select("*")
+      .eq("clinic_id", profile.clinic_id)
       .in("status", ["sent", "failed", "cancelled", "expired"])
-      .order("updated_at", { ascending: false })
-      .limit(50),
+      .order("created_at", { ascending: false }),
   ]);
 
-  type ReadyRow = {
-    id: string;
-    type: string;
-    phone: string;
-    language: string;
-    placeholders: Record<string, string>;
-  };
-
-  type ScheduledRow = {
-    id: string;
-    placeholders: Record<string, string>;
-  };
-
-  type ArchiveRow = {
-    id: string;
-    type: string;
-    status: string;
-    placeholders: Record<string, string>;
-    sent_at: string | null;
-    cancelled_at: string | null;
-    updated_at: string;
-  };
-
-  const ready: ReadyMessage[] = (readyResult.data ?? []).map((row: ReadyRow) => ({
-    id: row.id,
-    patientName: row.placeholders?.PATIENT_NAME ?? "Unknown",
-    type: row.type as "registration" | "receipt",
-    phone: row.phone,
-    language: row.language.toUpperCase(),
+  const ready: ReadyMessage[] = (readyData.data || []).map((msg: any) => ({
+    id: msg.id,
+    patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
+    phone: msg.phone,
+    type: msg.type as "registration" | "receipt",
+    language: msg.language,
+    status: msg.status,
+    createdAt: msg.created_at,
   }));
 
-  const scheduled: ScheduledReminder[] = (scheduledResult.data ?? []).map((row: ScheduledRow) => ({
-    id: row.id,
-    patientName: row.placeholders?.PATIENT_NAME ?? "Unknown",
-    doctorName: row.placeholders?.DOCTOR_NAME ?? "Unknown",
-    appointmentDate: row.placeholders?.APPOINTMENT_DATE ?? "",
-    appointmentTime: row.placeholders?.APPOINTMENT_TIME ?? "",
+  const scheduled: ScheduledReminder[] = (scheduledData.data || []).map((msg: any) => ({
+    id: msg.id,
+    patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
+    doctorName: msg.placeholders?.DOCTOR_NAME || "your doctor",
+    appointmentDate: msg.placeholders?.APPOINTMENT_DATE || "Unknown",
+    appointmentTime: msg.placeholders?.APPOINTMENT_TIME || "Unknown",
+    scheduledSendTime: msg.scheduled_send_time,
+    status: msg.status,
   }));
 
-  const archive: ArchiveMessage[] = (archiveResult.data ?? []).map((row: ArchiveRow) => ({
-    id: row.id,
-    patientName: row.placeholders?.PATIENT_NAME ?? "Unknown",
-    messageType: row.type.charAt(0).toUpperCase() + row.type.slice(1),
-    status: row.status as "sent" | "failed" | "cancelled" | "expired",
-    timestamp: row.sent_at ?? row.cancelled_at ?? row.updated_at,
+  const archive: ArchiveMessage[] = (archiveData.data || []).map((msg: any) => ({
+    id: msg.id,
+    patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
+    messageType: msg.type,
+    status: msg.status as "sent" | "failed" | "cancelled" | "expired",
+    timestamp: msg.sent_at || msg.created_at,
+    failureReason: msg.error_message,
   }));
 
-  return { ready, scheduled, archive };
+  return {
+    ready,
+    scheduled,
+    archive,
+  };
 }

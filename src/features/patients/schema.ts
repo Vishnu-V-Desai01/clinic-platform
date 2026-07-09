@@ -48,6 +48,16 @@ const mobileOptional = z
   })
   .transform((v) => (v === "" ? null : v))
 
+export const LANGUAGE_OPTIONS = [
+  { value: "kn", label: "Kannada" },
+  { value: "en", label: "English" },
+  { value: "hi", label: "Hindi" },
+  { value: "ta", label: "Tamil" },
+  { value: "gu", label: "Gujarati" },
+] as const
+
+const LANGUAGE_VALUES = LANGUAGE_OPTIONS.map((o) => o.value)
+
 export const patientFormSchema = z.object({
   // --- Basic information ---
   firstName: z.string().trim().min(1, "First name is required").max(255),
@@ -82,6 +92,18 @@ export const patientFormSchema = z.object({
     })
     .default("active"),
 
+  // --- Doctor assignment ---
+  // Shape-only validation here: "" becomes null, anything else must be a
+  // uuid. Whether it's actually REQUIRED depends on who's submitting
+  // (staff vs. doctor), which the schema has no way to know — that check
+  // lives in actions.ts, alongside requireRole().
+  assignedDoctorId: z
+    .string()
+    .transform((v) => (v === "" ? null : v))
+    .refine((v) => v === null || z.string().uuid().safeParse(v).success, {
+      message: "Invalid doctor selection",
+    }),
+
   // --- Contact details ---
   phone: mobileRequired,
   email: z
@@ -101,6 +123,14 @@ export const patientFormSchema = z.object({
     .refine((v) => v === null || /^\d{6}$/.test(v), {
       message: "Pincode must be 6 digits",
     }),
+
+  // --- Preferred language (WhatsApp messages) ---
+  languagePreference: z
+    .string()
+    .refine((v) => LANGUAGE_VALUES.includes(v as typeof LANGUAGE_VALUES[number]), {
+      message: "Invalid language",
+    })
+    .default("en"),
 
   // --- Emergency contact ---
   emergencyName: optionalText(255),

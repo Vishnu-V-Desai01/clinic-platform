@@ -60,15 +60,23 @@ export function hasRole(profile: Profile | null, ...allowed: Role[]): boolean {
 // For PAGES that only certain roles should reach.
 // Anyone else is sent back to "/".
 //
+// The return type narrows `role` to exactly the roles passed in — e.g.
+// requireRole('doctor', 'staff') returns Profile & { role: 'doctor' | 'staff' },
+// not the full Role union. This is type-only: it reflects a guarantee the
+// runtime check below already enforces (redirect() never returns if the
+// role doesn't match), it doesn't add any new logic.
+//
 // Future usage example (an analytics page):
 //   export default async function AnalyticsPage() {
 //     const profile = await requireRole('doctor')
 //     // only doctors get past this line
 //   }
-export async function requireRole(...allowed: Role[]): Promise<Profile> {
+export async function requireRole<T extends Role[]>(
+  ...allowed: T
+): Promise<Profile & { role: T[number] }> {
   const profile = await getOrCreateProfile()
   if (!profile || !allowed.includes(profile.role)) {
     redirect('/')
   }
-  return profile
+  return profile as Profile & { role: T[number] }
 }

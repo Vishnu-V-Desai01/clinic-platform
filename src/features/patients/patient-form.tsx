@@ -5,7 +5,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft, Calendar, Check, ChevronRight, FileText,
-  Heart, Lock, Mail, MapPin, Phone, User, X,
+  Heart, Languages, Lock, Mail, MapPin, Phone, User, X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -20,8 +20,10 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 
 import { createPatient, updatePatient } from "./actions"
+import { LANGUAGE_OPTIONS } from "./schema"
 import { BLOOD_GROUPS, GENDER_OPTIONS, RELATIONSHIP_OPTIONS, STATUS_OPTIONS } from "./types"
 import type { PatientFormValues, PatientRecord } from "./types"
+import type { DoctorOption } from "@/features/appointments/types"
 
 /* -------------------------------------------------------------------------- */
 /*  Props                                                                      */
@@ -30,6 +32,8 @@ import type { PatientFormValues, PatientRecord } from "./types"
 interface PatientFormProps {
   mode: "create" | "edit"
   patient?: PatientRecord
+  role: "doctor" | "staff"
+  doctorOptions: DoctorOption[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -38,8 +42,10 @@ interface PatientFormProps {
 
 const EMPTY_VALUES: PatientFormValues = {
   firstName: "", lastName: "", dateOfBirth: "", gender: "",
-  bloodGroup: "", mrn: "", status: "active", phone: "", email: "",
+  bloodGroup: "", mrn: "", status: "active", assignedDoctorId: "",
+  phone: "", email: "",
   addressLine: "", city: "", state: "", pincode: "",
+  languagePreference: "en",
   emergencyName: "", emergencyRelationship: "", emergencyPhone: "",
   allergies: [], conditions: [], notes: "",
 }
@@ -53,12 +59,14 @@ function toFormValues(p: PatientRecord): PatientFormValues {
     bloodGroup:            p.blood_group ?? "",
     mrn:                   p.patient_id_number ?? "",
     status:                p.status,
+    assignedDoctorId:      p.assigned_doctor_id ?? "",
     phone:                 p.phone,
     email:                 p.email ?? "",
     addressLine:           p.address ?? "",
     city:                  p.city ?? "",
     state:                 p.state ?? "",
     pincode:               p.postal_code ?? "",
+    languagePreference:    p.language_preference ?? "en",
     emergencyName:         p.emergency_contact_name ?? "",
     emergencyRelationship: p.emergency_contact_relationship ?? "",
     emergencyPhone:        p.emergency_contact_phone ?? "",
@@ -170,7 +178,7 @@ function ChipInput({
 /*  Main component                                                             */
 /* -------------------------------------------------------------------------- */
 
-export default function PatientForm({ mode, patient }: PatientFormProps) {
+export default function PatientForm({ mode, patient, role, doctorOptions }: PatientFormProps) {
   const router                       = useRouter()
   const [isPending, startTransition] = React.useTransition()
   const [serverError, setError]      = React.useState<string | null>(null)
@@ -309,6 +317,22 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
                       </SelectContent>
                     </Select>
                   </div>
+                  {role === "staff" && (
+                    <div className="flex flex-col gap-2 sm:col-span-2">
+                      <FieldLabel htmlFor="assignedDoctorId" required>Assign Doctor</FieldLabel>
+                      <Select value={values.assignedDoctorId}
+                        onValueChange={(v) => set("assignedDoctorId", v)}>
+                        <SelectTrigger id="assignedDoctorId" className="h-11 w-full">
+                          <SelectValue placeholder="Select doctor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {doctorOptions.map((d) => (
+                            <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
 
                 {isEdit && (
@@ -389,6 +413,25 @@ export default function PatientForm({ mode, patient }: PatientFormProps) {
                       value={values.email}
                       onChange={(e) => set("email", e.target.value)} />
                   </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <FieldLabel htmlFor="languagePreference" required>
+                    Preferred Language (for WhatsApp)
+                  </FieldLabel>
+                  <Select value={values.languagePreference}
+                    onValueChange={(v) => set("languagePreference", v as PatientFormValues["languagePreference"])}>
+                    <SelectTrigger id="languagePreference" className="h-11 w-full">
+                      <div className="flex items-center gap-2">
+                        <Languages className="size-4 text-muted-foreground" />
+                        <SelectValue placeholder="Select language" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGE_OPTIONS.map((l) => (
+                        <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex flex-col gap-2">
                   <FieldLabel htmlFor="address">Address Line</FieldLabel>

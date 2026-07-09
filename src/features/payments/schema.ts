@@ -35,6 +35,10 @@ export const RemoveLineItemSchema = z.object({
 
 export const CreatePaymentCollectionSchema = z.object({
   payment_id: z.string().uuid(),
+  // Shape-only here — "" / undefined becomes null. Whether it's actually
+  // REQUIRED depends on who's submitting (staff vs. doctor), which the
+  // schema has no way to know — that check lives in actions.ts.
+  doctor_id: z.string().uuid().nullable().optional(),
   amount_collected: z.number().min(0.01, 'Amount must be greater than 0'),
   collection_date: z.date(),
   payment_method: z.enum(['cash', 'card', 'upi', 'bank_transfer', 'check', 'other']),
@@ -66,9 +70,12 @@ export const SetAmountAndApprovePaymentSchema = z.object({
   approval_notes: z.string().nullish(),
 });
 
-// Updated — uses line_items array instead of single description + amount
+// Updated — uses line_items array instead of single description + amount.
+// doctor_id: same shape-only / actions.ts-enforces-requiredness pattern as
+// payment_collections above.
 export const CreateManualChargeSchema = z.object({
   patient_id: z.string().uuid(),
+  doctor_id: z.string().uuid().nullable().optional(),
   line_items: z.array(LineItemInputSchema).min(1, 'At least one item is required'),
   approval_notes: z.string().nullish(),
 });
