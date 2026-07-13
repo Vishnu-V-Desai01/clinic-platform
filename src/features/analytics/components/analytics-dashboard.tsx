@@ -22,6 +22,9 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AlertTriangle, TrendingUp, RefreshCw, Inbox } from 'lucide-react';
 import type { AnomalyMetricName, AnomalyDirection, AnomalySeverity } from '../types';
+import AppointmentEfficiency, {
+  type AppointmentEfficiencyData,
+} from './appointment-efficiency';
 
 // ============================================================================
 // Types
@@ -87,6 +90,7 @@ interface AnalyticsDashboardProps {
   appointmentsSeries?: AppointmentsPoint[];
   registrationsSeries?: RegistrationsPoint[];
   busiestDays?: BusiestDay[];
+  appointmentEfficiency?: AppointmentEfficiencyData;
   onRangeChange?: (range: { preset: string; start?: string; end?: string }) => void;
   onRunRollup?: () => void;
   isRollupPending?: boolean;
@@ -325,6 +329,7 @@ export default function AnalyticsDashboard({
   appointmentsSeries = [],
   registrationsSeries = [],
   busiestDays = [],
+  appointmentEfficiency,
   onRangeChange,
   onRunRollup,
   isRollupPending = false,
@@ -542,7 +547,7 @@ export default function AnalyticsDashboard({
         </div>
 
         {/* Activity Section */}
-        <div>
+        <div className="mb-8">
           <h2 className="text-lg font-semibold text-foreground mb-4">Activity</h2>
 
           {/* Activity Stat Cards */}
@@ -698,6 +703,9 @@ export default function AnalyticsDashboard({
             </div>
           )}
         </div>
+
+        {/* Appointment Efficiency Section (Chat 14, Step 2) */}
+        <AppointmentEfficiency data={appointmentEfficiency} />
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 // src/features/analytics/actions.ts
 //
-// Doctor-only descriptive analytics (Chat 13) + predictive alerts data
-// layer (Chat 14). Several genuinely different things live here:
+// Doctor-only descriptive analytics (Chat 13) + predictive alerts (Chat 14
+// Step 1) + appointment efficiency (Chat 14 Step 2). Several genuinely
+// different things live here:
 //   - getDoctorDashboardData: a LIVE query against appointments/payments/
 //     payment_collections/patients for whatever date range the doctor has
 //     selected. This is what the summary cards render — always accurate,
@@ -17,6 +18,9 @@
 //     runs deterministic statistical anomaly detection (rolling mean /
 //     std-dev — NOT AI) against that day's appointment/no-show/revenue
 //     counts.
+//   - getAppointmentEfficiency: a LIVE query against appointments only —
+//     same reasoning as getDoctorDashboardData, always accurate for an
+//     arbitrary custom range.
 //
 // Everything here is requireRole('doctor') only — no 'staff' — matching
 // the original brief exactly. Every query is additionally scoped to
@@ -45,6 +49,9 @@ import type {
   AnomalyDirection,
   AnomalyAlertRecord,
   TimeSeriesPoint,
+  AppointmentEfficiencyResult,
+  CancellationReasonCount,
+  BusiestHourPoint,
 } from './types'
 
 type Result<T> =
@@ -286,18 +293,23 @@ export async function getDoctorDashboardSeries(rawFilter: unknown): Promise<Resu
 
 // ── Anomaly alerts read ──────────────────────────────────────────────────────
 
-export async function getDoctorAnomalyAlerts(rawFilter: unknown): Promise<Result<AnomalyAlertRecord[]>> {
+/**
+ * Deliberately NOT scoped to the dashboard's selected date-range filter
+ * (Chat 14, Step 1f). Anomaly banners are a "what's happening right now"
+ * status indicator, not a historical report — widening the range picker
+ * to "This Month" should change the charts and stat cards below it, but
+ * shouldn't resurrect a stale alert from a week ago still labeled "today"
+ * (buildAnomalyMessage in analytics-dashboard.tsx hardcodes "today" in its
+ * copy, which only makes sense if every alert shown is actually from
+ * today). Always pinned to todayIST(), independent of whatever range the
+ * rest of the page is showing.
+ */
+export async function getDoctorAnomalyAlerts(): Promise<Result<AnomalyAlertRecord[]>> {
   try {
     const profile = await requireRole('doctor')
-
-    const parsed = dateRangeFilterSchema.safeParse(rawFilter)
-    if (!parsed.success) {
-      const message = parsed.error.issues[0]?.message ?? 'Invalid date range.'
-      return { success: false, error: message }
-    }
-
-    const { startDate, endDate } = resolveDateRange(parsed.data)
     const supabase = createServerSupabaseClient()
+
+    const today = todayIST()
 
     const { data, error } = await supabase
       .from('anomaly_alerts')
@@ -305,14 +317,12 @@ export async function getDoctorAnomalyAlerts(rawFilter: unknown): Promise<Result
       .eq('clinic_id', profile.clinic_id)
       .eq('doctor_id', profile.id)
       .eq('is_acknowledged', false)
-      .gte('alert_date', startDate)
-      .lte('alert_date', endDate)
+      .eq('alert_date', today)
       // Alphabetical ascending puts "critical" before "warning" (c < w) —
       // most urgent first. There's no dismiss UI yet, so is_acknowledged
       // is always false today; the filter above is forward-looking for
       // when that exists.
       .order('severity', { ascending: true })
-      .order('alert_date', { ascending: false })
 
     if (error) throw error
 
@@ -322,7 +332,6 @@ export async function getDoctorAnomalyAlerts(rawFilter: unknown): Promise<Result
     return { success: false, error: 'Failed to load alerts.' }
   }
 }
-
 // ── Anomaly detection ────────────────────────────────────────────────────────
 // Deterministic statistics only — rolling mean / sample std-dev / z-score.
 // No AI, no model calls. Runs as part of the daily rollup below.
@@ -651,5 +660,168 @@ export async function runDailyRollup(
   } catch (err) {
     console.error('[runDailyRollup]', err)
     return { success: false, error: 'Failed to compute daily metrics.' }
+  }
+}
+
+// ── Appointment efficiency (live query) ─────────────────────────────────────
+// Chat 14, Step 2. No slots table and no real start/end time tracking
+// exist in this schema (confirmed during recon) — so this deliberately
+// does NOT attempt "average consultation duration" or "slot utilization"
+// in the literal sense. Everything here is derived from what's actually
+// reliable: appointment_date, created_at, status, cancellation_reason.
+
+function toISTDateString(isoTimestamp: string): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+  const ist = new Date(new Date(isoTimestamp).getTime() + IST_OFFSET_MS)
+  return ist.toISOString().slice(0, 10)
+}
+
+function toISTHour(isoTimestamp: string): number {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+  const ist = new Date(new Date(isoTimestamp).getTime() + IST_OFFSET_MS)
+  return ist.getUTCHours()
+}
+
+function formatHourLabel(hour: number): string {
+  const period = hour < 12 ? 'AM' : 'PM'
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12
+  return `${displayHour} ${period}`
+}
+
+export async function getAppointmentEfficiency(
+  rawFilter: unknown,
+): Promise<Result<AppointmentEfficiencyResult>> {
+  try {
+    const profile = await requireRole('doctor')
+
+    const parsed = dateRangeFilterSchema.safeParse(rawFilter)
+    if (!parsed.success) {
+      const message = parsed.error.issues[0]?.message ?? 'Invalid date range.'
+      return { success: false, error: message }
+    }
+
+    const { startDate, endDate } = resolveDateRange(parsed.data)
+    const { startBound, endExclusive } = istRangeBounds(startDate, endDate)
+
+    const supabase = createServerSupabaseClient()
+
+    const { data: rangeAppts, error: rangeErr } = await supabase
+      .from('appointments')
+      .select('id, patient_id, status, appointment_date, created_at, cancellation_reason')
+      .eq('clinic_id', profile.clinic_id)
+      .eq('doctor_id', profile.id)
+      .is('deleted_at', null)
+      .gte('appointment_date', startBound)
+      .lt('appointment_date', endExclusive)
+
+    if (rangeErr) throw rangeErr
+
+    const appts = rangeAppts ?? []
+    const totalAppointments = appts.length
+
+    if (totalAppointments === 0) {
+      return {
+        success: true,
+        data: {
+          totalAppointments: 0,
+          sameDayBookings: 0,
+          advanceBookings: 0,
+          sameDayBookingRate: 0,
+          repeatPatientAppointments: 0,
+          newPatientAppointments: 0,
+          repeatPatientRate: 0,
+          cancellationReasons: [],
+          busiestHours: [],
+        },
+      }
+    }
+
+    // ── Same-day vs. advance booking ──────────────────────────────────────
+    let sameDayBookings = 0
+    for (const a of appts) {
+      if (!a.created_at) continue // defensively skip if somehow null
+      if (toISTDateString(a.created_at) === toISTDateString(a.appointment_date)) {
+        sameDayBookings++
+      }
+    }
+    const advanceBookings = totalAppointments - sameDayBookings
+
+    // ── Repeat patient rate ──────────────────────────────────────────────
+    // "Repeat" = this patient has more than one appointment ON RECORD
+    // OVERALL (not just within this range) — a patient with only one
+    // appointment ever, even if it happens to be the only one shown in
+    // this filtered range, is a first-time patient, not a repeat one.
+    const patientIds = Array.from(new Set(appts.map((a) => a.patient_id)))
+
+    const { data: allTimeAppts, error: allTimeErr } = await supabase
+      .from('appointments')
+      .select('patient_id')
+      .eq('clinic_id', profile.clinic_id)
+      .eq('doctor_id', profile.id)
+      .is('deleted_at', null)
+      .in('patient_id', patientIds)
+
+    if (allTimeErr) throw allTimeErr
+
+    const allTimeCountByPatient = new Map<string, number>()
+    for (const row of allTimeAppts ?? []) {
+      allTimeCountByPatient.set(row.patient_id, (allTimeCountByPatient.get(row.patient_id) ?? 0) + 1)
+    }
+
+    let repeatPatientAppointments = 0
+    for (const a of appts) {
+      if ((allTimeCountByPatient.get(a.patient_id) ?? 0) > 1) {
+        repeatPatientAppointments++
+      }
+    }
+    const newPatientAppointments = totalAppointments - repeatPatientAppointments
+
+    // ── Cancellation reasons ─────────────────────────────────────────────
+    // Grouped by normalized (trimmed, lowercased) text so near-duplicate
+    // free-text entries collapse together; display label is
+    // capitalized-first-letter of the normalized form, not the raw
+    // original text, since raw casing is inconsistent by nature of being
+    // free-text.
+    const reasonCounts = new Map<string, number>()
+    for (const a of appts) {
+      if (a.status !== 'cancelled') continue
+      const raw = (a.cancellation_reason ?? '').trim()
+      const key = raw.length > 0 ? raw.toLowerCase() : 'not specified'
+      reasonCounts.set(key, (reasonCounts.get(key) ?? 0) + 1)
+    }
+    const cancellationReasons: CancellationReasonCount[] = Array.from(reasonCounts.entries())
+      .map(([key, count]) => ({
+        reason: key.charAt(0).toUpperCase() + key.slice(1),
+        count,
+      }))
+      .sort((a, b) => b.count - a.count)
+
+    // ── Busiest hour of day ───────────────────────────────────────────────
+    const hourCounts = new Array(24).fill(0)
+    for (const a of appts) {
+      hourCounts[toISTHour(a.appointment_date)]++
+    }
+    const busiestHours: BusiestHourPoint[] = hourCounts
+      .map((count, hour) => ({ hour, label: formatHourLabel(hour), count }))
+      .filter((h) => h.count > 0)
+      .sort((a, b) => a.hour - b.hour)
+
+    return {
+      success: true,
+      data: {
+        totalAppointments,
+        sameDayBookings,
+        advanceBookings,
+        sameDayBookingRate: sameDayBookings / totalAppointments,
+        repeatPatientAppointments,
+        newPatientAppointments,
+        repeatPatientRate: repeatPatientAppointments / totalAppointments,
+        cancellationReasons,
+        busiestHours,
+      },
+    }
+  } catch (err) {
+    console.error('[getAppointmentEfficiency]', err)
+    return { success: false, error: 'Failed to load appointment efficiency data.' }
   }
 }

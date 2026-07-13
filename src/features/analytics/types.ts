@@ -1,7 +1,7 @@
 // src/features/analytics/types.ts
 //
-// Types for the doctor-only descriptive dashboard (Chat 13) and the
-// extended predictive-alerts scope (Chat 14 kickoff).
+// Types for the doctor-only descriptive dashboard (Chat 13), predictive
+// alerts (Chat 14 Step 1), and appointment efficiency (Chat 14 Step 2).
 // DailyMetricRecord / AnomalyAlertRecord mirror the daily_metrics /
 // anomaly_alerts tables exactly (see migration
 // 20260707090000_doctor_attribution_and_dashboard_metrics.sql).
@@ -140,4 +140,40 @@ export interface DoctorDashboardSeries {
   appointmentsSeries: AppointmentsSeriesPoint[]
   registrationsSeries: TimeSeriesPoint[]
   busiestDays: BusiestDayPoint[]
+}
+
+/* ----------------------- Appointment efficiency shapes -------------------- */
+// Chat 14, Step 2. Live-queried from appointments directly (not
+// daily_metrics) — this isn't pre-aggregated yet, and adding it to the
+// rollup would be its own separate schema decision. Same LIVE-query
+// pattern as getDoctorDashboardData: always accurate for an arbitrary
+// custom range, no dependency on the rollup having run.
+//
+// Deliberately does NOT include "average consultation duration" or "slot
+// utilization" — recon confirmed no real start/end time tracking and no
+// slots table exist in this schema. duration_minutes exists but defaults
+// to 30 and isn't reliably edited, so it's excluded rather than risk
+// reporting a misleading average back to the doctor.
+
+export interface CancellationReasonCount {
+  reason: string // normalized (trimmed, lowercased-then-capitalized) — see actions.ts
+  count: number
+}
+
+export interface BusiestHourPoint {
+  hour: number // 0–23, IST
+  label: string // e.g. "9 AM", "2 PM" — precomputed so the UI doesn't reformat
+  count: number
+}
+
+export interface AppointmentEfficiencyResult {
+  totalAppointments: number
+  sameDayBookings: number
+  advanceBookings: number
+  sameDayBookingRate: number // 0–1
+  repeatPatientAppointments: number
+  newPatientAppointments: number
+  repeatPatientRate: number // 0–1
+  cancellationReasons: CancellationReasonCount[]
+  busiestHours: BusiestHourPoint[]
 }

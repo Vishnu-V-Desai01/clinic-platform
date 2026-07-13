@@ -2,16 +2,8 @@
 //
 // Bridges the presentational AnalyticsDashboard (label-based range state,
 // e.g. "This Week") and the backend (snake_case DateRangePreset values,
-// e.g. "this_week"). Fetches all three data sources in parallel on mount
-// and on every range change.
-//
-// CHAT 14 (Step 1d): the manual rollup trigger moved here from the
-// standalone /dashboard/analytics/dev-rollup route — that route was
-// always scaffolding to prove runDailyRollup() worked at all (Step 1b),
-// not a permanent home. It now lives as an icon button in the dashboard
-// header itself. currentFilter is tracked in state so the rollup handler
-// knows which range to reload afterward — previously "the range currently
-// on screen" only existed as a closure inside handleRangeChange.
+// e.g. "this_week"). Fetches all data sources in parallel on mount and on
+// every range change.
 
 'use client'
 
@@ -21,9 +13,15 @@ import {
   getDoctorDashboardData,
   getDoctorDashboardSeries,
   getDoctorAnomalyAlerts,
+  getAppointmentEfficiency,
   runDailyRollup,
 } from '../actions'
-import type { DoctorDashboardResult, DoctorDashboardSeries, AnomalyAlertRecord } from '../types'
+import type {
+  DoctorDashboardResult,
+  DoctorDashboardSeries,
+  AnomalyAlertRecord,
+  AppointmentEfficiencyResult,
+} from '../types'
 import type { DateRangeFilterInput } from '../schema'
 
 const PRESET_LABEL_TO_VALUE: Record<string, DateRangeFilterInput['preset']> = {
@@ -52,6 +50,7 @@ export default function AnalyticsDashboardContainer() {
   const [result, setResult] = useState<DoctorDashboardResult | null>(null)
   const [series, setSeries] = useState<DoctorDashboardSeries | null>(null)
   const [anomalies, setAnomalies] = useState<AnomalyAlertRecord[]>([])
+  const [efficiency, setEfficiency] = useState<AppointmentEfficiencyResult | null>(null)
   const [currentFilter, setCurrentFilter] = useState<DateRangeFilterInput>({ preset: 'this_month' })
 
   const [isRollupPending, startRollupTransition] = useTransition()
@@ -61,11 +60,12 @@ export default function AnalyticsDashboardContainer() {
     setLoading(true)
     setError(null)
 
-    const [dataRes, seriesRes, anomalyRes] = await Promise.all([
-      getDoctorDashboardData(filter),
-      getDoctorDashboardSeries(filter),
-      getDoctorAnomalyAlerts(filter),
-    ])
+    const [dataRes, seriesRes, anomalyRes, efficiencyRes] = await Promise.all([
+  getDoctorDashboardData(filter),
+  getDoctorDashboardSeries(filter),
+  getDoctorAnomalyAlerts(),
+  getAppointmentEfficiency(filter),
+])
 
     // Summary cards are the core of the page — a failure here is fatal.
     if (!dataRes.success) {
@@ -76,7 +76,8 @@ export default function AnalyticsDashboardContainer() {
     }
     setResult(dataRes.data)
 
-    // Charts and alerts degrade gracefully — the cards still work without them.
+    // Charts, alerts, and efficiency all degrade gracefully — the cards
+    // still work without them.
     if (seriesRes.success) {
       setSeries(seriesRes.data)
     } else {
@@ -89,6 +90,13 @@ export default function AnalyticsDashboardContainer() {
     } else {
       console.error('[AnalyticsDashboardContainer] anomalies failed:', anomalyRes.error)
       setAnomalies([])
+    }
+
+    if (efficiencyRes.success) {
+      setEfficiency(efficiencyRes.data)
+    } else {
+      console.error('[AnalyticsDashboardContainer] efficiency failed:', efficiencyRes.error)
+      setEfficiency(null)
     }
 
     setLoading(false)
@@ -153,6 +161,7 @@ export default function AnalyticsDashboardContainer() {
         series?.registrationsSeries.map((p) => ({ date: p.date, count: p.value })) ?? []
       }
       busiestDays={series?.busiestDays ?? []}
+      appointmentEfficiency={efficiency ?? undefined}
       onRangeChange={handleRangeChange}
       onRunRollup={handleRunRollup}
       isRollupPending={isRollupPending}
