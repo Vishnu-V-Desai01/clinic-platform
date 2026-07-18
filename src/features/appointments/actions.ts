@@ -122,10 +122,14 @@ async function checkDoubleBooking(
   const proposedStart = new Date(appointmentDateISO)
   const proposedEnd   = new Date(proposedStart.getTime() + durationMinutes * 60_000)
 
-  const dayStart = new Date(proposedStart)
-  dayStart.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(proposedStart)
-  dayEnd.setHours(23, 59, 59, 999)
+  // IST-anchored day window, independent of the server process's own
+  // timezone. appointmentDateISO is always built by combineDateAndTime()
+  // as "YYYY-MM-DDTHH:MM:00+05:30", so its first 10 characters are
+  // reliably the IST calendar date - unlike the previous .setHours()
+  // approach, which read the process's local timezone.
+  const istDatePart = appointmentDateISO.slice(0, 10)
+  const dayStart = new Date(`${istDatePart}T00:00:00.000+05:30`)
+  const dayEnd   = new Date(`${istDatePart}T23:59:59.999+05:30`)
 
   const { data, error } = await supabase
     .from("appointments")
@@ -193,6 +197,11 @@ export async function listAppointments(filters?: {
   const profile = await requireRole("doctor", "staff")
 
   try {
+    if (!profile.clinic_id) {
+      return { success: false, error: "Your account is not associated with a clinic." }
+    }
+    const clinicId = profile.clinic_id
+
     const supabase = createServerSupabaseClient()
 
     let query = supabase
@@ -208,7 +217,7 @@ export async function listAppointments(filters?: {
         patients ( first_name, last_name, patient_id_number ),
         profiles!appointments_doctor_id_fkey ( full_name, specialization )
       `)
-      .eq("clinic_id", profile.clinic_id)
+      .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("appointment_date", { ascending: false })
 
@@ -226,7 +235,7 @@ export async function listAppointments(filters?: {
       const r = row as unknown as AppointmentListRow
       const ctx: AppointmentWithContext = {
         id:                   r.id,
-        clinic_id:            profile.clinic_id,
+        clinic_id:            clinicId,
         patient_id:           r.patient_id,
         patient_first_name:   r.patients?.first_name  ?? "—",
         patient_last_name:    r.patients?.last_name   ?? "—",

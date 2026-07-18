@@ -1,5 +1,4 @@
 // src/lib/nav-config.ts
-
 import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard,
@@ -29,7 +28,7 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
     { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
-    { title: 'Settings', href: '/dashboard/settings', icon: Settings },
+    // Settings moved to admin nav — clinic configuration is an admin responsibility
   ],
   staff: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -38,7 +37,6 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
     { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
-    { title: 'Settings', href: '/dashboard/settings', icon: Settings },
   ],
   patient: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -46,3 +44,10 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   ],
 }
+
+// Shown when a doctor+admin user is inside /dashboard/admin/* or /dashboard/settings
+export const adminModeNav: NavItem[] = [
+  { title: 'Dashboard', href: '/dashboard/admin', icon: LayoutDashboard },
+  { title: 'Team Members', href: '/dashboard/admin/users', icon: Users },
+  { title: 'Settings', href: '/dashboard/settings', icon: Settings },
+]

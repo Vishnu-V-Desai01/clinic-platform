@@ -1,7 +1,6 @@
 'use client'
-
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { UserButton } from '@clerk/nextjs'
 import {
   Sidebar,
@@ -16,20 +15,41 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { navByRole } from '@/lib/nav-config'
+import { navByRole, adminModeNav } from '@/lib/nav-config'
 import type { Profile } from '@/lib/supabase/profile'
 import { ModeToggle } from '@/components/mode-toggle'
+import ModeSwitchButton from '@/components/mode-switch-button'
 
 export function AppSidebar({ profile }: { profile: Profile }) {
   const pathname = usePathname()
-  const navItems = navByRole[profile.role]
+  const router = useRouter()
+
+  // Settings lives at /dashboard/settings (shared URL) but belongs
+  // to the admin context — keep admin nav active when navigating there.
+  const isAdminMode =
+    profile.is_clinic_admin &&
+    (pathname.startsWith('/dashboard/admin') ||
+      pathname === '/dashboard/settings' ||
+      pathname.startsWith('/dashboard/settings/'))
+
+  const navItems = isAdminMode ? adminModeNav : navByRole[profile.role]
+
+  function handleModeSwitch(targetMode: 'admin' | 'doctor') {
+    router.push(targetMode === 'admin' ? '/dashboard/admin' : '/dashboard/patients')
+  }
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b px-4 py-3">
+      <SidebarHeader className="border-b px-4 py-3 space-y-3">
         <p className="text-sm font-semibold tracking-tight">Clinic Platform</p>
+        <ModeSwitchButton
+          currentMode={isAdminMode ? 'admin' : 'doctor'}
+          role={profile.role}
+          isClinicAdmin={profile.is_clinic_admin}
+          size="nav"
+          onSwitch={handleModeSwitch}
+        />
       </SidebarHeader>
-
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
@@ -57,7 +77,6 @@ export function AppSidebar({ profile }: { profile: Profile }) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
       <SidebarFooter className="border-t p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -74,7 +93,6 @@ export function AppSidebar({ profile }: { profile: Profile }) {
           <ModeToggle />
         </div>
       </SidebarFooter>
-
       <SidebarRail />
     </Sidebar>
   )

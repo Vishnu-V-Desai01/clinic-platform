@@ -25,6 +25,9 @@ import type {
 // ---------------------------------------------------------------
 // READ — all encounters for a patient (newest first)
 // Doctor + staff
+// FIX (this chat): now restricted to doctor/staff, matching every
+// other feature's read functions - previously any authenticated role
+// (including 'patient') could call this.
 // ---------------------------------------------------------------
 export async function getEncountersForPatient(
   patientId: string
@@ -32,6 +35,7 @@ export async function getEncountersForPatient(
   try {
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
+    if (!['doctor', 'staff'].includes(profile.role)) return { error: 'Unauthorized' }
 
     const supabase = await createServerSupabaseClient()
 
@@ -51,13 +55,21 @@ export async function getEncountersForPatient(
 // ---------------------------------------------------------------
 // READ — single encounter with all children
 // Doctor + staff
+// FIX (this chat): now restricted to doctor/staff (previously any
+// authenticated role). Also, a failed child-table query (diagnoses/
+// observations/prescriptions/test_results) is now surfaced via an
+// optional `warnings` array instead of being silently treated as
+// "this encounter has none" - the encounter and any children that DID
+// load are still returned, since failing the whole request over one
+// flaky child query would lose strictly more information than it saves.
 // ---------------------------------------------------------------
 export async function getEncounterWithDetails(
   encounterId: string
-): Promise<{ data: EncounterWithDetails } | { error: string }> {
+): Promise<{ data: EncounterWithDetails; warnings?: string[] } | { error: string }> {
   try {
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
+    if (!['doctor', 'staff'].includes(profile.role)) return { error: 'Unauthorized' }
 
     const supabase = await createServerSupabaseClient()
 
@@ -73,15 +85,33 @@ export async function getEncounterWithDetails(
     if (encounterRes.error) return { error: encounterRes.error.message }
     if (!encounterRes.data)  return { error: 'Encounter not found' }
 
-    return {
-      data: {
-        ...encounterRes.data,
-        diagnoses:     diagnosesRes.data    ?? [],
-        observations:  observationsRes.data  ?? [],
-        prescriptions: prescriptionsRes.data ?? [],
-        test_results:  testResultsRes.data   ?? [],
-      },
+    const warnings: string[] = []
+    if (diagnosesRes.error) {
+      console.error('Diagnoses fetch error:', diagnosesRes.error.message)
+      warnings.push('Some diagnoses could not be loaded.')
     }
+    if (observationsRes.error) {
+      console.error('Observations fetch error:', observationsRes.error.message)
+      warnings.push('Some observations could not be loaded.')
+    }
+    if (prescriptionsRes.error) {
+      console.error('Prescriptions fetch error:', prescriptionsRes.error.message)
+      warnings.push('Some prescriptions could not be loaded.')
+    }
+    if (testResultsRes.error) {
+      console.error('Test results fetch error:', testResultsRes.error.message)
+      warnings.push('Some test results could not be loaded.')
+    }
+
+    const data: EncounterWithDetails = {
+      ...encounterRes.data,
+      diagnoses:     diagnosesRes.data    ?? [],
+      observations:  observationsRes.data  ?? [],
+      prescriptions: prescriptionsRes.data ?? [],
+      test_results:  testResultsRes.data   ?? [],
+    }
+
+    return warnings.length > 0 ? { data, warnings } : { data }
   } catch {
     return { error: 'Failed to load encounter details' }
   }
@@ -93,11 +123,19 @@ export async function getEncounterWithDetails(
 // If a child batch fails it is logged but the encounter is still
 // returned — doctor can add missing items individually.
 // Doctor only
+// FIX (this chat): a failed child batch is now also surfaced via an
+// optional `warnings` array on the success response, in addition to
+// the existing console.error. Previously the caller had no way to
+// know anything was dropped - success:true looked identical whether
+// everything saved or some batches silently failed.
 // ---------------------------------------------------------------
 export async function createEncounter(
   patientId: string,
   rawData: unknown
-): Promise<{ success: true; encounterId: string } | { error: string }> {
+): Promise<
+  | { success: true; encounterId: string; warnings?: string[] }
+  | { error: string }
+> {
   try {
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
@@ -130,6 +168,7 @@ export async function createEncounter(
     if (!encounter)     return { error: 'Failed to create encounter' }
 
     const encounterId = encounter.id
+    const warnings: string[] = []
 
     // 2. Bulk-insert diagnoses
     if (diagnoses.length > 0) {
@@ -146,7 +185,10 @@ export async function createEncounter(
           notes:          d.notes       ?? null,
         }))
       )
-      if (error) console.error('Diagnoses insert error:', error.message)
+      if (error) {
+        console.error('Diagnoses insert error:', error.message)
+        warnings.push('Some diagnoses could not be saved.')
+      }
     }
 
     // 3. Bulk-insert observations
@@ -164,7 +206,10 @@ export async function createEncounter(
           notes:            o.notes       ?? null,
         }))
       )
-      if (error) console.error('Observations insert error:', error.message)
+      if (error) {
+        console.error('Observations insert error:', error.message)
+        warnings.push('Some observations could not be saved.')
+      }
     }
 
     // 4. Bulk-insert prescriptions
@@ -182,10 +227,15 @@ export async function createEncounter(
           status:        p.status,
         }))
       )
-      if (error) console.error('Prescriptions insert error:', error.message)
+      if (error) {
+        console.error('Prescriptions insert error:', error.message)
+        warnings.push('Some prescriptions could not be saved.')
+      }
     }
 
-    return { success: true, encounterId }
+    return warnings.length > 0
+      ? { success: true, encounterId, warnings }
+      : { success: true, encounterId }
   } catch {
     return { error: 'Failed to create encounter' }
   }

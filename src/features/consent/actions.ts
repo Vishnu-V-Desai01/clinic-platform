@@ -8,7 +8,7 @@ import type { PatientConsent, ConsentPurpose } from './types'
 
 type ActionResult = { success: true } | { success: false; error: string }
 
-// ─── Read ─────────────────────────────────────────────────────────────────────
+// ─── Read ─────────────────────────────────────────────────────────────
 
 // Fetch all consent records for a patient (active and revoked).
 // Server components call this to render the consent section.
@@ -49,7 +49,7 @@ export async function hasActiveConsent(
   return data !== null
 }
 
-// ─── Mutations ────────────────────────────────────────────────────────────────
+// ─── Mutations ────────────────────────────────────────────────────────
 
 // Grant (or re-grant) consent for one purpose.
 // Upsert: if a record already exists for that patient + purpose it is
@@ -67,6 +67,21 @@ export async function grantConsent(raw: unknown): Promise<ActionResult> {
 
   const { patient_id, purpose, notes } = parsed.data
   const supabase = createServerSupabaseClient()
+
+  // Confirm the patient actually belongs to this clinic before granting
+  // consent on their behalf - patient_id alone was previously trusted
+  // from client input with no ownership check.
+  const { data: patient, error: patientError } = await supabase
+    .from('patients')
+    .select('id')
+    .eq('id', patient_id)
+    .eq('clinic_id', profile.clinic_id)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (patientError) return { success: false, error: patientError.message }
+  if (!patient) return { success: false, error: 'Patient not found.' }
+
   const now = new Date().toISOString()
 
   const { error } = await supabase.from('patient_consents').upsert(
@@ -112,7 +127,7 @@ export async function revokeConsent(
   const supabase = createServerSupabaseClient()
   const now = new Date().toISOString()
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('patient_consents')
     .update({
       is_active:  false,
@@ -122,8 +137,12 @@ export async function revokeConsent(
       updated_at: now,
     })
     .eq('id', consent_id)
+    .eq('clinic_id', profile.clinic_id)
+    .select('id')
+    .single()
 
   if (error) return { success: false, error: error.message }
+  if (!data) return { success: false, error: 'Consent record not found.' }
 
   revalidatePath(`/patients/${patientId}`)
   return { success: true }

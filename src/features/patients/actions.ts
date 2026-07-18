@@ -52,8 +52,9 @@ function toListItem(row: PatientRecord): PatientListItem {
 }
 
 export async function listPatients(): Promise<Result<PatientListItem[]>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -76,8 +77,9 @@ export async function listPatients(): Promise<Result<PatientListItem[]>> {
 }
 
 export async function getPatient(id: string): Promise<Result<PatientRecord>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
     const { data, error } = await supabase
@@ -99,14 +101,23 @@ export async function getPatient(id: string): Promise<Result<PatientRecord>> {
 }
 
 export async function createPatient(raw: unknown): Promise<Result<PatientRecord>> {
-  try {
-    const profile = await requireRole("doctor", "staff")
+  const profile = await requireRole("doctor", "staff")
 
+  try {
     const parsed = patientFormSchema.safeParse(raw)
     if (!parsed.success) {
       const message =
         parsed.error.issues[0]?.message ?? "Please check the form and try again."
       return { success: false, error: message }
+    }
+
+    // clinic_id is genuinely nullable on Profile now (patients have none
+    // by design), but requireRole("doctor", "staff") means role is never
+    // 'patient' here, so a real clinic_id should always be present. This
+    // check fails clearly instead of silently writing clinic_id: null
+    // into a new patient row if that invariant is ever violated.
+    if (!profile.clinic_id) {
+      return { success: false, error: "Your account is not associated with a clinic." }
     }
 
     // A doctor registering a patient can only ever assign that patient to
@@ -158,14 +169,18 @@ export async function updatePatient(
   id:  string,
   raw: unknown,
 ): Promise<Result<PatientRecord>> {
-  try {
-    const profile = await requireRole("doctor", "staff")
+  const profile = await requireRole("doctor", "staff")
 
+  try {
     const parsed = patientFormSchema.safeParse(raw)
     if (!parsed.success) {
       const message =
         parsed.error.issues[0]?.message ?? "Please check the form and try again."
       return { success: false, error: message }
+    }
+
+    if (!profile.clinic_id) {
+      return { success: false, error: "Your account is not associated with a clinic." }
     }
 
     if (profile.role === "staff" && !parsed.data.assignedDoctorId) {
@@ -211,18 +226,22 @@ export async function updatePatient(
 export async function archivePatient(
   id: string,
 ): Promise<Result<{ id: string }>> {
+  const profile = await requireRole("doctor", "staff")
+
   try {
-    const profile  = await requireRole("doctor", "staff")
     const supabase = createServerSupabaseClient()
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("patients")
       .update({ status: "archived" })
       .eq("id", id)
       .eq("clinic_id", profile.clinic_id)
       .is("deleted_at", null)
+      .select("id")
+      .single()
 
     if (error) throw error
+    if (!data) return { success: false, error: "Patient not found." }
 
     return { success: true, data: { id } }
   } catch (err) {

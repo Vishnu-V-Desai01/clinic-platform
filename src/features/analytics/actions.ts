@@ -1,37 +1,3 @@
-// src/features/analytics/actions.ts
-//
-// Doctor-only descriptive analytics (Chat 13) + predictive alerts (Chat 14
-// Step 1) + appointment efficiency (Chat 14 Step 2). Several genuinely
-// different things live here:
-//   - getDoctorDashboardData: a LIVE query against appointments/payments/
-//     payment_collections/patients for whatever date range the doctor has
-//     selected. This is what the summary cards render — always accurate,
-//     works with an arbitrary custom range, no dependency on the rollup
-//     having run.
-//   - getDoctorDashboardSeries / getDoctorAnomalyAlerts: read from
-//     daily_metrics / anomaly_alerts instead of live tables — these feed
-//     the charts and alert banners, and only reflect days the rollup has
-//     actually processed. A live per-day scan across a 90-day range would
-//     be needlessly expensive; daily_metrics exists specifically so this
-//     doesn't have to happen.
-//   - runDailyRollup: writes ONE day's numbers into daily_metrics, then
-//     runs deterministic statistical anomaly detection (rolling mean /
-//     std-dev — NOT AI) against that day's appointment/no-show/revenue
-//     counts.
-//   - getAppointmentEfficiency: a LIVE query against appointments only —
-//     same reasoning as getDoctorDashboardData, always accurate for an
-//     arbitrary custom range.
-//
-// Everything here is requireRole('doctor') only — no 'staff' — matching
-// the original brief exactly. Every query is additionally scoped to
-// doctor_id = profile.id; there is no clinic-wide view here.
-//
-// IMPORTANT LIMITATION: runDailyRollup is user-invoked and scoped to
-// whichever doctor calls it (correct for today's manual-trigger button).
-// A real cron job has no logged-in user — when pg_cron is wired up at
-// deploy time, it needs a separate, privileged version of this logic
-// that loops every doctor in every clinic, not this one, called once.
-
 'use server'
 
 import { revalidatePath } from 'next/cache'
@@ -58,18 +24,6 @@ type Result<T> =
   | { success: true; data: T }
   | { success: false; error: string }
 
-/**
- * daily_metrics' uniqueness is enforced by two PARTIAL unique indexes (a
- * doctor-scoped one and a future clinic-wide one), and Supabase's
- * .upsert({ onConflict }) can only emit "ON CONFLICT (columns)" with no
- * WHERE clause — which Postgres refuses to match against a partial index.
- * A plain .upsert() here would insert fine once, then fail every time the
- * same day is rolled up again. This does an explicit find-then-write
- * instead. There's a small race window if two writers hit the same
- * (clinic, doctor, day) at once, but this only ever runs from a manual
- * button click today, and a single daily cron job later — never
- * concurrent writers in practice.
- */
 async function upsertDailyMetric(
   supabase: ReturnType<typeof createServerSupabaseClient>,
   row: Omit<DailyMetricRecord, 'id' | 'created_at' | 'updated_at'>,
@@ -97,8 +51,6 @@ async function upsertDailyMetric(
     if (error) throw error
   }
 }
-
-// ── Dashboard read (summary cards) ──────────────────────────────────────────
 
 export async function getDoctorDashboardData(rawFilter: unknown): Promise<Result<DoctorDashboardResult>> {
   try {
@@ -152,9 +104,6 @@ export async function getDoctorDashboardData(rawFilter: unknown): Promise<Result
         .is('deleted_at', null)
         .gte('created_at', startBound)
         .lt('created_at', endExclusive),
-      // Outstanding balance is a LIVE snapshot, not scoped to the date
-      // range — see IncomeSummary.outstandingBalancePaise's doc comment
-      // in types.ts for why summing it across days would double-count.
       supabase
         .from('payments')
         .select('outstanding_balance')
@@ -217,8 +166,6 @@ export async function getDoctorDashboardData(rawFilter: unknown): Promise<Result
   }
 }
 
-// ── Chart series read (from daily_metrics, not live tables) ────────────────
-
 export async function getDoctorDashboardSeries(rawFilter: unknown): Promise<Result<DoctorDashboardSeries>> {
   try {
     const profile = await requireRole('doctor')
@@ -264,12 +211,6 @@ export async function getDoctorDashboardSeries(rawFilter: unknown): Promise<Resu
       value: r.new_registrations || 0,
     }))
 
-    // Busiest days = day-of-week aggregation, not specific dates (specific
-    // dates would just duplicate the appointments-over-time chart's
-    // X-axis). metric_date is a plain DATE with no timezone component, so
-    // parsing it as UTC midnight and reading getUTCDay() is safe — there's
-    // no offset to accidentally shift across, we're only ever asking "what
-    // weekday was this calendar date".
     const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const MONDAY_FIRST_ORDER = [1, 2, 3, 4, 5, 6, 0]
 
@@ -291,19 +232,6 @@ export async function getDoctorDashboardSeries(rawFilter: unknown): Promise<Resu
   }
 }
 
-// ── Anomaly alerts read ──────────────────────────────────────────────────────
-
-/**
- * Deliberately NOT scoped to the dashboard's selected date-range filter
- * (Chat 14, Step 1f). Anomaly banners are a "what's happening right now"
- * status indicator, not a historical report — widening the range picker
- * to "This Month" should change the charts and stat cards below it, but
- * shouldn't resurrect a stale alert from a week ago still labeled "today"
- * (buildAnomalyMessage in analytics-dashboard.tsx hardcodes "today" in its
- * copy, which only makes sense if every alert shown is actually from
- * today). Always pinned to todayIST(), independent of whatever range the
- * rest of the page is showing.
- */
 export async function getDoctorAnomalyAlerts(): Promise<Result<AnomalyAlertRecord[]>> {
   try {
     const profile = await requireRole('doctor')
@@ -318,10 +246,6 @@ export async function getDoctorAnomalyAlerts(): Promise<Result<AnomalyAlertRecor
       .eq('doctor_id', profile.id)
       .eq('is_acknowledged', false)
       .eq('alert_date', today)
-      // Alphabetical ascending puts "critical" before "warning" (c < w) —
-      // most urgent first. There's no dismiss UI yet, so is_acknowledged
-      // is always false today; the filter above is forward-looking for
-      // when that exists.
       .order('severity', { ascending: true })
 
     if (error) throw error
@@ -332,9 +256,6 @@ export async function getDoctorAnomalyAlerts(): Promise<Result<AnomalyAlertRecor
     return { success: false, error: 'Failed to load alerts.' }
   }
 }
-// ── Anomaly detection ────────────────────────────────────────────────────────
-// Deterministic statistics only — rolling mean / sample std-dev / z-score.
-// No AI, no model calls. Runs as part of the daily rollup below.
 
 const ANOMALY_WINDOW_DAYS = 14
 const ANOMALY_MIN_HISTORY_DAYS = 7
@@ -343,10 +264,6 @@ const Z_CRITICAL = 3
 const STDDEV_EPSILON = 0.01
 const ZERO_VARIANCE_Z_CAP = 5
 
-// CHAT 14 (Step 1a): appointments_no_show and revenue_collected added.
-// evaluateAnomaliesForDay below is generic over AnomalyMetricName, so no
-// other change to the detection logic itself was required for the two new
-// metrics to start being checked.
 const ANOMALY_METRICS: AnomalyMetricName[] = [
   'appointments_total',
   'appointments_cancelled',
@@ -405,9 +322,6 @@ async function upsertAnomalyAlert(
   if (findError) throw findError
 
   if (existing) {
-    // Recomputed value replaces the old one; is_acknowledged deliberately
-    // left untouched — a doctor who already dismissed today's alert
-    // shouldn't have it silently reappear just because the rollup re-ran.
     const { error } = await supabase
       .from('anomaly_alerts')
       .update({
@@ -426,20 +340,6 @@ async function upsertAnomalyAlert(
   }
 }
 
-/**
- * Evaluates all tracked metrics for one doctor's one day against their
- * own trailing history, writing or clearing anomaly_alerts rows as
- * appropriate. Returns the metric names that triggered an alert this run
- * (for the caller to report back, e.g. "2 anomalies detected").
- *
- * CHAT 14 (Step 1e): each metric's iteration is now wrapped in its own
- * try/catch. Previously a single metric throwing (e.g. the metric_name
- * CHECK constraint rejecting an unrecognized value before its migration
- * landed) silently aborted every metric after it in the ANOMALY_METRICS
- * array — appointments_no_show and revenue_collected both went missing
- * from a single failure on appointments_no_show. One metric failing now
- * only skips that metric; every other metric still gets evaluated.
- */
 async function evaluateAnomaliesForDay(
   supabase: ReturnType<typeof createServerSupabaseClient>,
   clinicId: string,
@@ -465,8 +365,6 @@ async function evaluateAnomaliesForDay(
       const history = (data ?? []).map((row) => (row as Record<string, number>)[metric])
 
       if (history.length < ANOMALY_MIN_HISTORY_DAYS) {
-        // Not enough history to mean anything yet — a new clinic's first
-        // week shouldn't trigger false alarms against almost nothing.
         await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
         continue
       }
@@ -478,11 +376,6 @@ async function evaluateAnomaliesForDay(
       let direction: AnomalyDirection
 
       if (stddev < STDDEV_EPSILON) {
-        // The last N days were (near-)identical. If today matches too,
-        // there's nothing to flag. If today differs at all, that's a real
-        // break from a genuinely constant pattern — flag it, with the
-        // z-score capped rather than computed (dividing by ~0 would blow
-        // up into a meaningless huge or infinite number).
         if (Math.abs(actual - mean) < STDDEV_EPSILON) {
           await clearAnomalyAlert(supabase, clinicId, doctorId, targetDate, metric)
           continue
@@ -518,8 +411,6 @@ async function evaluateAnomaliesForDay(
 
       triggered.push(metric)
     } catch (metricErr) {
-      // Isolated per metric — one bad metric (constraint violation,
-      // transient DB error) no longer takes its siblings down with it.
       console.error(`[evaluateAnomaliesForDay] Metric "${metric}" failed:`, metricErr)
     }
   }
@@ -527,24 +418,22 @@ async function evaluateAnomaliesForDay(
   return triggered
 }
 
-// ── Daily rollup (Option B: manual trigger for now) ─────────────────────────
-
-/**
- * Computes and stores one day's aggregates for the current doctor, then
- * runs anomaly detection against that day's appointment/no-show/revenue
- * counts.
- *
- * Defaults to today (IST) rather than yesterday: a manual, dev-time
- * trigger is most useful for immediately seeing today's activity
- * reflected. The real deploy-time cron job will call an equivalent,
- * privileged version of this for "yesterday", once a day has fully
- * closed out, across every doctor — not this one, user-scoped function.
- */
 export async function runDailyRollup(
   dateStr?: string,
 ): Promise<Result<{ date: string; alertsTriggered: number }>> {
   try {
     const profile = await requireRole('doctor')
+
+    // clinic_id is nullable on Profile now (patients have none by design),
+    // but requireRole('doctor') means role is never 'patient' here. A real
+    // doctor always gets a clinic_id from createClinicAndBecomeAdmin or
+    // acceptStaffInvitation. This guard makes the type error at upsertDailyMetric
+    // (strict string field) and evaluateAnomaliesForDay (strict string parameter)
+    // explicit rather than silently writing null into a row.
+    if (!profile.clinic_id) {
+      return { success: false, error: 'Your account is not associated with a clinic.' }
+    }
+    const clinicId = profile.clinic_id
 
     const targetDate = dateStr ?? todayIST()
     if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate) || Number.isNaN(Date.parse(targetDate))) {
@@ -563,7 +452,7 @@ export async function runDailyRollup(
       supabase
         .from('appointments')
         .select('id, status, patient_id')
-        .eq('clinic_id', profile.clinic_id)
+        .eq('clinic_id', clinicId)
         .eq('doctor_id', profile.id)
         .is('deleted_at', null)
         .gte('appointment_date', startBound)
@@ -571,21 +460,21 @@ export async function runDailyRollup(
       supabase
         .from('payments')
         .select('id, amount_charged, approval_status, outstanding_balance')
-        .eq('clinic_id', profile.clinic_id)
+        .eq('clinic_id', clinicId)
         .eq('doctor_id', profile.id)
         .gte('created_at', startBound)
         .lt('created_at', endExclusive),
       supabase
         .from('payment_collections')
         .select('amount_collected')
-        .eq('clinic_id', profile.clinic_id)
+        .eq('clinic_id', clinicId)
         .eq('doctor_id', profile.id)
         .gte('collection_date', startBound)
         .lt('collection_date', endExclusive),
       supabase
         .from('patients')
         .select('id')
-        .eq('clinic_id', profile.clinic_id)
+        .eq('clinic_id', clinicId)
         .eq('assigned_doctor_id', profile.id)
         .is('deleted_at', null)
         .gte('created_at', startBound)
@@ -612,10 +501,9 @@ export async function runDailyRollup(
     const revenueCollected = sum(collectionRows.map((c) => c.amount_collected))
 
     await upsertDailyMetric(supabase, {
-      clinic_id: profile.clinic_id,
+      clinic_id: clinicId,
       doctor_id: profile.id,
       metric_date: targetDate,
-
       appointments_total: appointmentsTotal,
       appointments_completed: apptRows.filter((a) => a.status === 'completed').length,
       appointments_cancelled: appointmentsCancelled,
@@ -624,7 +512,6 @@ export async function runDailyRollup(
         apptRows.filter((a) => a.status === 'completed').map((a) => a.patient_id),
       ).size,
       new_registrations: (newPatients ?? []).length,
-
       payments_count: payRows.length,
       total_billed: sum(payRows.map((p) => p.amount_charged)),
       revenue_collected: revenueCollected,
@@ -632,18 +519,9 @@ export async function runDailyRollup(
       outstanding_balance_new: sum(approvedCharges.map((p) => p.outstanding_balance)),
     })
 
-    // Anomaly detection is a secondary enrichment on top of the metric
-    // save above, not the primary contract of this function — a failure
-    // here shouldn't make the whole rollup report as failed when the
-    // day's actual numbers saved just fine. (This outer try/catch is a
-    // second layer on top of Step 1e's per-metric isolation inside
-    // evaluateAnomaliesForDay — that inner one keeps one bad metric from
-    // blocking its siblings; this outer one keeps the whole detection
-    // step, if it somehow throws before even reaching the loop, from
-    // blocking the metric save that already succeeded.)
     let alertsTriggered = 0
     try {
-      const triggered = await evaluateAnomaliesForDay(supabase, profile.clinic_id, profile.id, targetDate, {
+      const triggered = await evaluateAnomaliesForDay(supabase, clinicId, profile.id, targetDate, {
         appointments_total: appointmentsTotal,
         appointments_cancelled: appointmentsCancelled,
         appointments_no_show: appointmentsNoShow,
@@ -662,13 +540,6 @@ export async function runDailyRollup(
     return { success: false, error: 'Failed to compute daily metrics.' }
   }
 }
-
-// ── Appointment efficiency (live query) ─────────────────────────────────────
-// Chat 14, Step 2. No slots table and no real start/end time tracking
-// exist in this schema (confirmed during recon) — so this deliberately
-// does NOT attempt "average consultation duration" or "slot utilization"
-// in the literal sense. Everything here is derived from what's actually
-// reliable: appointment_date, created_at, status, cancellation_reason.
 
 function toISTDateString(isoTimestamp: string): string {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
@@ -736,21 +607,15 @@ export async function getAppointmentEfficiency(
       }
     }
 
-    // ── Same-day vs. advance booking ──────────────────────────────────────
     let sameDayBookings = 0
     for (const a of appts) {
-      if (!a.created_at) continue // defensively skip if somehow null
+      if (!a.created_at) continue
       if (toISTDateString(a.created_at) === toISTDateString(a.appointment_date)) {
         sameDayBookings++
       }
     }
     const advanceBookings = totalAppointments - sameDayBookings
 
-    // ── Repeat patient rate ──────────────────────────────────────────────
-    // "Repeat" = this patient has more than one appointment ON RECORD
-    // OVERALL (not just within this range) — a patient with only one
-    // appointment ever, even if it happens to be the only one shown in
-    // this filtered range, is a first-time patient, not a repeat one.
     const patientIds = Array.from(new Set(appts.map((a) => a.patient_id)))
 
     const { data: allTimeAppts, error: allTimeErr } = await supabase
@@ -776,12 +641,6 @@ export async function getAppointmentEfficiency(
     }
     const newPatientAppointments = totalAppointments - repeatPatientAppointments
 
-    // ── Cancellation reasons ─────────────────────────────────────────────
-    // Grouped by normalized (trimmed, lowercased) text so near-duplicate
-    // free-text entries collapse together; display label is
-    // capitalized-first-letter of the normalized form, not the raw
-    // original text, since raw casing is inconsistent by nature of being
-    // free-text.
     const reasonCounts = new Map<string, number>()
     for (const a of appts) {
       if (a.status !== 'cancelled') continue
@@ -796,7 +655,6 @@ export async function getAppointmentEfficiency(
       }))
       .sort((a, b) => b.count - a.count)
 
-    // ── Busiest hour of day ───────────────────────────────────────────────
     const hourCounts = new Array(24).fill(0)
     for (const a of appts) {
       hourCounts[toISTHour(a.appointment_date)]++
