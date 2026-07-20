@@ -3,20 +3,24 @@
 // All appointment-related types live here — one source of truth.
 // Convention: data is always in DATABASE form (status "scheduled", times in ISO 8601).
 // Friendly labels ("Scheduled", "2:30 PM") are applied only when rendering.
+//
+// Chat 19: added doctorId to AppointmentListItem so the client can gate
+// "Mark as Complete" to the logged-in doctor's own appointments without
+// an extra server round-trip. Ownership is re-verified server-side in
+// getVisitPrefill before any data is loaded.
 
 /* ----------------------------- Value types ------------------------------ */
 
 export type AppointmentStatus = "scheduled" | "completed" | "cancelled" | "no_show"
 
 /* ------------------------- Database row (snake_case) --------------------- */
-// Mirrors the `appointments` table exactly. This is what a SELECT returns.
 
 export interface AppointmentRecord {
   id: string
   clinic_id: string
   patient_id: string
   doctor_id: string
-  appointment_date: string       // ISO 8601: "2026-06-20T14:30:00+05:30"
+  appointment_date: string
   duration_minutes: number
   status: AppointmentStatus
   chief_complaint: string | null
@@ -28,8 +32,6 @@ export interface AppointmentRecord {
 }
 
 /* ----------------------- Joined row (with names) ------------------------ */
-// Returned by list and detail queries — patient and doctor names are
-// joined in so the UI doesn't need extra round-trips.
 
 export interface AppointmentWithContext extends AppointmentRecord {
   patient_first_name: string
@@ -40,34 +42,32 @@ export interface AppointmentWithContext extends AppointmentRecord {
 }
 
 /* --------------------------- Form values (camelCase) --------------------- */
-// What the create form works with.
 
 export interface AppointmentFormValues {
   patientId: string
   doctorId: string
-  appointmentDate: string   // "YYYY-MM-DD"
-  appointmentTime: string   // "HH:MM"
+  appointmentDate: string
+  appointmentTime: string
   durationMinutes: number
   chiefComplaint: string
 }
 
 /* ------------------------- List row (display shape) ---------------------- */
-// Compact shape for the appointments list table.
 
 export interface AppointmentListItem {
-  id: string
-  patientName: string
-  patientMrn: string | null
-  doctorName: string
-  appointmentDate: string   // "YYYY-MM-DD"
-  appointmentTime: string   // "HH:MM"
+  id:              string
+  doctorId:        string        // ← Chat 19: added for Mark as Complete gate
+  patientName:     string
+  patientMrn:      string | null
+  doctorName:      string
+  appointmentDate: string
+  appointmentTime: string
   durationMinutes: number
-  status: AppointmentStatus
-  chiefComplaint: string | null
+  status:          AppointmentStatus
+  chiefComplaint:  string | null
 }
 
 /* -------------------- Detail view (display shape) ----------------------- */
-// Richer shape for the single appointment detail page.
 
 export interface AppointmentDetail {
   id: string
@@ -89,10 +89,9 @@ export interface AppointmentDetail {
 }
 
 /* -------------------- Doctor option (for booking form) ------------------ */
-// Populated by listDoctors() — drives the doctor dropdown on the form.
 
 export interface DoctorOption {
-  id: string                  // profiles.id — stored as appointment.doctor_id
+  id: string
   fullName: string
   specialization: string | null
 }
@@ -131,7 +130,6 @@ export function durationLabel(minutes: number): string {
   return DURATION_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} min`
 }
 
-/** "2026-06-20" from an ISO timestamp, in IST */
 export function formatAppointmentDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString("en-CA", {
@@ -139,13 +137,12 @@ export function formatAppointmentDate(iso: string): string {
       year:     "numeric",
       month:    "2-digit",
       day:      "2-digit",
-    }) // en-CA gives YYYY-MM-DD
+    })
   } catch {
     return "—"
   }
 }
 
-/** "14:30" from an ISO timestamp, in IST */
 export function formatAppointmentTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString("en-IN", {
@@ -159,7 +156,6 @@ export function formatAppointmentTime(iso: string): string {
   }
 }
 
-/** "20 Jun 2026, 2:30 PM" — used in detail views and notifications */
 export function formatAppointmentDateTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString("en-IN", {
@@ -176,8 +172,6 @@ export function formatAppointmentDateTime(iso: string): string {
   }
 }
 
-/** True if the appointment is still in the future — used to decide
- *  whether reschedule / cancel buttons are shown. */
 export function isUpcoming(iso: string): boolean {
   try {
     return new Date(iso) > new Date()
@@ -186,7 +180,6 @@ export function isUpcoming(iso: string): boolean {
   }
 }
 
-/** True if the appointment time has already passed. */
 export function isPast(iso: string): boolean {
   try {
     return new Date(iso) < new Date()

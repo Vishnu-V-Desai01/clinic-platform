@@ -1,7 +1,18 @@
+// src/features/appointments/components/appointments-list.tsx
+//
+// Change log (Chat 19):
+//   - Added userRole + currentUserId props (passed from server page).
+//   - Imported MarkCompleteButton from post-visit feature.
+//   - Renders MarkCompleteButton in the actions cell when:
+//       appt.status === 'scheduled'  AND
+//       userRole    === 'doctor'      AND
+//       appt.doctorId === currentUserId   (own appointment only)
+//   - Actions column widened to min-w-[280px] to fit the new button.
+
 "use client"
 
 import { useState, useMemo } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter }         from "next/navigation"
 import {
   Plus,
   Search,
@@ -11,11 +22,11 @@ import {
   ChevronRight,
 } from "lucide-react"
 
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { cn }                      from "@/lib/utils"
+import { Button }                  from "@/components/ui/button"
+import { Input }                   from "@/components/ui/input"
+import { Badge }                   from "@/components/ui/badge"
+import { Avatar, AvatarFallback }  from "@/components/ui/avatar"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -47,8 +58,9 @@ import {
   statusLabel,
 } from "../types"
 import NewAppointmentDialog, { type PatientOption } from "./new-appointment-dialog"
-import RescheduleDialog from "./reschedule-dialog"
-import CancelDialog from "./cancel-dialog"
+import RescheduleDialog  from "./reschedule-dialog"
+import CancelDialog      from "./cancel-dialog"
+import { MarkCompleteButton } from "@/features/post-visit"
 
 const PAGE_SIZE = 10
 
@@ -93,15 +105,21 @@ function displayDateTime(date: string, time: string): string {
 }
 
 interface AppointmentsListProps {
-  appointments: AppointmentListItem[]
-  patients:     PatientOption[]
-  doctors:      DoctorOption[]
+  appointments:  AppointmentListItem[]
+  patients:      PatientOption[]
+  doctors:       DoctorOption[]
+  /** Role of the currently logged-in user — from requireRole() on the page. */
+  userRole:      string
+  /** Supabase profile.id of the logged-in user — to gate own-appointment check. */
+  currentUserId: string
 }
 
 export default function AppointmentsList({
   appointments,
   patients,
   doctors,
+  userRole,
+  currentUserId,
 }: AppointmentsListProps) {
   const router = useRouter()
 
@@ -135,7 +153,6 @@ export default function AppointmentsList({
       .sort((a, b) => {
         const aT = new Date(`${a.appointmentDate}T${a.appointmentTime}:00+05:30`).getTime()
         const bT = new Date(`${b.appointmentDate}T${b.appointmentTime}:00+05:30`).getTime()
-        // Past: newest first. Upcoming / All: soonest first.
         return scope === "past" ? bT - aT : aT - bT
       })
   }, [appointments, search, statusFilter, scope])
@@ -220,7 +237,8 @@ export default function AppointmentsList({
                   <TableHead className="min-w-[190px]">Date &amp; Time</TableHead>
                   <TableHead className="min-w-[100px]">Duration</TableHead>
                   <TableHead className="min-w-[120px]">Status</TableHead>
-                  <TableHead className="min-w-[120px] text-right">Actions</TableHead>
+                  {/* Widened to fit Mark as Complete button */}
+                  <TableHead className="min-w-[280px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -239,78 +257,101 @@ export default function AppointmentsList({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pageRows.map((appt) => (
-                    <TableRow key={appt.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="size-9">
-                            <AvatarFallback className="bg-muted text-xs font-medium text-muted-foreground">
-                              {getInitials(appt.patientName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0">
-                            <div className="font-medium text-foreground">
-                              {appt.patientName}
-                            </div>
-                            {appt.patientMrn && (
-                              <div className="text-sm text-muted-foreground">
-                                {appt.patientMrn}
+                  pageRows.map((appt) => {
+                    // Show "Mark as Complete" only for scheduled appointments
+                    // that belong to the logged-in doctor.
+                    // Server re-validates ownership in getVisitPrefill —
+                    // this check is UX only (avoids the error state entirely).
+                    const showMarkComplete =
+                      appt.status     === "scheduled" &&
+                      userRole        === "doctor"    &&
+                      appt.doctorId   === currentUserId
+
+                    return (
+                      <TableRow key={appt.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="size-9">
+                              <AvatarFallback className="bg-muted text-xs font-medium text-muted-foreground">
+                                {getInitials(appt.patientName)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <div className="font-medium text-foreground">
+                                {appt.patientName}
                               </div>
+                              {appt.patientMrn && (
+                                <div className="text-sm text-muted-foreground">
+                                  {appt.patientMrn}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-foreground">{appt.doctorName}</TableCell>
+                        <TableCell className="text-foreground">
+                          {displayDateTime(appt.appointmentDate, appt.appointmentTime)}
+                        </TableCell>
+                        <TableCell className="text-foreground">
+                          {appt.durationMinutes} min
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={appt.status} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* View — always shown */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                router.push(`/dashboard/appointments/${appt.id}`)
+                              }
+                            >
+                              View
+                            </Button>
+
+                            {/* Mark as Complete — doctor's own scheduled appointment */}
+                            {showMarkComplete && (
+                              <MarkCompleteButton
+                                appointmentId={appt.id}
+                                patientName={appt.patientName}
+                                variant="outline"
+                              />
+                            )}
+
+                            {/* Reschedule / Cancel dropdown — scheduled only */}
+                            {appt.status === "scheduled" && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={`More actions for ${appt.patientName}`}
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => setRescheduleTarget(appt)}
+                                  >
+                                    Reschedule
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setCancelTarget(appt)}
+                                  >
+                                    Cancel
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             )}
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-foreground">{appt.doctorName}</TableCell>
-                      <TableCell className="text-foreground">
-                        {displayDateTime(appt.appointmentDate, appt.appointmentTime)}
-                      </TableCell>
-                      <TableCell className="text-foreground">
-                        {appt.durationMinutes} min
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={appt.status} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              router.push(`/dashboard/appointments/${appt.id}`)
-                            }
-                          >
-                            View
-                          </Button>
-                          {appt.status === "scheduled" && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  aria-label={`More actions for ${appt.patientName}`}
-                                >
-                                  <MoreHorizontal className="size-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => setRescheduleTarget(appt)}
-                                >
-                                  Reschedule
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onClick={() => setCancelTarget(appt)}
-                                >
-                                  Cancel
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
@@ -348,7 +389,7 @@ export default function AppointmentsList({
         </div>
       </div>
 
-      {/* Dialogs rendered outside the main div so they're not clipped */}
+      {/* Dialogs — outside main div so they're not clipped */}
       <NewAppointmentDialog
         open={bookingOpen}
         onOpenChange={setBookingOpen}

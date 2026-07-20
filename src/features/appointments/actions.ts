@@ -9,6 +9,9 @@
 // happened (the function still exits before reaching the database), but
 // the error message was actively wrong about why. Fix: requireRole() now
 // runs before each try block, so failures propagate as a real redirect.
+//
+// Chat 19: toListItem() now returns doctorId so the appointments list
+// can gate "Mark as Complete" to the logged-in doctor's own rows.
 
 "use server"
 
@@ -80,6 +83,7 @@ function combineDateAndTime(date: string, time: string): string {
 function toListItem(row: AppointmentWithContext): AppointmentListItem {
   return {
     id:              row.id,
+    doctorId:        row.doctor_id,   // ← Chat 19: added
     patientName:     `${row.patient_first_name} ${row.patient_last_name}`,
     patientMrn:      row.patient_mrn,
     doctorName:      row.doctor_full_name,
@@ -93,22 +97,22 @@ function toListItem(row: AppointmentWithContext): AppointmentListItem {
 
 function toDetail(row: AppointmentWithContext): AppointmentDetail {
   return {
-    id:                  row.id,
-    patientId:           row.patient_id,
-    patientName:         `${row.patient_first_name} ${row.patient_last_name}`,
-    patientMrn:          row.patient_mrn,
-    doctorId:            row.doctor_id,
-    doctorName:          row.doctor_full_name,
+    id:                   row.id,
+    patientId:            row.patient_id,
+    patientName:          `${row.patient_first_name} ${row.patient_last_name}`,
+    patientMrn:           row.patient_mrn,
+    doctorId:             row.doctor_id,
+    doctorName:           row.doctor_full_name,
     doctorSpecialization: row.doctor_specialization,
-    appointmentDate:     formatAppointmentDate(row.appointment_date),
-    appointmentTime:     formatAppointmentTime(row.appointment_date),
-    durationMinutes:     row.duration_minutes,
-    status:              row.status,
-    chiefComplaint:      row.chief_complaint,
-    doctorNotes:         row.doctor_notes,
-    cancellationReason:  row.cancellation_reason,
-    createdAt:           row.created_at,
-    updatedAt:           row.updated_at,
+    appointmentDate:      formatAppointmentDate(row.appointment_date),
+    appointmentTime:      formatAppointmentTime(row.appointment_date),
+    durationMinutes:      row.duration_minutes,
+    status:               row.status,
+    chiefComplaint:       row.chief_complaint,
+    doctorNotes:          row.doctor_notes,
+    cancellationReason:   row.cancellation_reason,
+    createdAt:            row.created_at,
+    updatedAt:            row.updated_at,
   }
 }
 
@@ -122,14 +126,9 @@ async function checkDoubleBooking(
   const proposedStart = new Date(appointmentDateISO)
   const proposedEnd   = new Date(proposedStart.getTime() + durationMinutes * 60_000)
 
-  // IST-anchored day window, independent of the server process's own
-  // timezone. appointmentDateISO is always built by combineDateAndTime()
-  // as "YYYY-MM-DDTHH:MM:00+05:30", so its first 10 characters are
-  // reliably the IST calendar date - unlike the previous .setHours()
-  // approach, which read the process's local timezone.
   const istDatePart = appointmentDateISO.slice(0, 10)
-  const dayStart = new Date(`${istDatePart}T00:00:00.000+05:30`)
-  const dayEnd   = new Date(`${istDatePart}T23:59:59.999+05:30`)
+  const dayStart    = new Date(`${istDatePart}T00:00:00.000+05:30`)
+  const dayEnd      = new Date(`${istDatePart}T23:59:59.999+05:30`)
 
   const { data, error } = await supabase
     .from("appointments")
@@ -234,24 +233,24 @@ export async function listAppointments(filters?: {
     const items = (data ?? []).map((row) => {
       const r = row as unknown as AppointmentListRow
       const ctx: AppointmentWithContext = {
-        id:                   r.id,
-        clinic_id:            clinicId,
-        patient_id:           r.patient_id,
-        patient_first_name:   r.patients?.first_name  ?? "—",
-        patient_last_name:    r.patients?.last_name   ?? "—",
-        patient_mrn:          r.patients?.patient_id_number ?? null,
-        doctor_id:            r.doctor_id,
-        doctor_full_name:     r.profiles?.full_name   ?? "—",
+        id:                    r.id,
+        clinic_id:             clinicId,
+        patient_id:            r.patient_id,
+        patient_first_name:    r.patients?.first_name  ?? "—",
+        patient_last_name:     r.patients?.last_name   ?? "—",
+        patient_mrn:           r.patients?.patient_id_number ?? null,
+        doctor_id:             r.doctor_id,
+        doctor_full_name:      r.profiles?.full_name   ?? "—",
         doctor_specialization: r.profiles?.specialization ?? null,
-        appointment_date:     r.appointment_date,
-        duration_minutes:     r.duration_minutes,
-        status:               r.status as AppointmentWithContext["status"],
-        chief_complaint:      r.chief_complaint,
-        doctor_notes:         null,
-        cancellation_reason:  null,
-        deleted_at:           null,
-        created_at:           "",
-        updated_at:           "",
+        appointment_date:      r.appointment_date,
+        duration_minutes:      r.duration_minutes,
+        status:                r.status as AppointmentWithContext["status"],
+        chief_complaint:       r.chief_complaint,
+        doctor_notes:          null,
+        cancellation_reason:   null,
+        deleted_at:            null,
+        created_at:            "",
+        updated_at:            "",
       }
       return toListItem(ctx)
     })
@@ -299,24 +298,24 @@ export async function getAppointmentById(
 
     const r = data as unknown as AppointmentDetailRow
     const ctx: AppointmentWithContext = {
-      id:                   r.id,
-      clinic_id:            r.clinic_id,
-      patient_id:           r.patient_id,
-      patient_first_name:   r.patients?.first_name  ?? "—",
-      patient_last_name:    r.patients?.last_name   ?? "—",
-      patient_mrn:          r.patients?.patient_id_number ?? null,
-      doctor_id:            r.doctor_id,
-      doctor_full_name:     r.profiles?.full_name   ?? "—",
+      id:                    r.id,
+      clinic_id:             r.clinic_id,
+      patient_id:            r.patient_id,
+      patient_first_name:    r.patients?.first_name  ?? "—",
+      patient_last_name:     r.patients?.last_name   ?? "—",
+      patient_mrn:           r.patients?.patient_id_number ?? null,
+      doctor_id:             r.doctor_id,
+      doctor_full_name:      r.profiles?.full_name   ?? "—",
       doctor_specialization: r.profiles?.specialization ?? null,
-      appointment_date:     r.appointment_date,
-      duration_minutes:     r.duration_minutes,
-      status:               r.status as AppointmentWithContext["status"],
-      chief_complaint:      r.chief_complaint,
-      doctor_notes:         r.doctor_notes,
-      cancellation_reason:  r.cancellation_reason,
-      deleted_at:           null,
-      created_at:           r.created_at,
-      updated_at:           r.updated_at,
+      appointment_date:      r.appointment_date,
+      duration_minutes:      r.duration_minutes,
+      status:                r.status as AppointmentWithContext["status"],
+      chief_complaint:       r.chief_complaint,
+      doctor_notes:          r.doctor_notes,
+      cancellation_reason:   r.cancellation_reason,
+      deleted_at:            null,
+      created_at:            r.created_at,
+      updated_at:            r.updated_at,
     }
 
     return { success: true, data: toDetail(ctx) }
@@ -339,7 +338,7 @@ export async function createAppointment(
     }
 
     const data: CreateAppointmentData = parsed.data
-    const supabase  = createServerSupabaseClient()
+    const supabase    = createServerSupabaseClient()
     const isoDateTime = combineDateAndTime(data.appointmentDate, data.appointmentTime)
 
     const hasConflict = await checkDoubleBooking(
@@ -365,7 +364,6 @@ export async function createAppointment(
 
     if (error) throw error
 
-    // Queue WhatsApp appointment reminder — non-blocking
     try {
       await createAppointmentMessage({ appointmentId: (created as AppointmentRecord).id })
     } catch (err) {
