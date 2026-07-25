@@ -13,6 +13,7 @@ import { getEncountersForPatient } from '@/features/medical-records/actions';
 import { listAppointments } from '@/features/appointments/actions';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
+import RemindersList from '@/features/reminders/components/RemindersList'
 
 export const metadata = { title: 'Patient Profile' };
 
@@ -231,6 +232,10 @@ export default async function PatientPage({
           </CardContent>
         </Card>
       ) : null}
+
+      {showPayments && (
+        <RemindersList patientId={id} />
+      )}
 
       <ConsentSection patientId={id} />
 

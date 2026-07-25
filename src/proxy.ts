@@ -6,6 +6,7 @@ const isPublicRoute = createRouteMatcher([
   '/monitoring(.*)',
   '/api/public/(.*)',
   '/accept-invitation(.*)',
+  '/api/cron/send-medicine-reminders',
 ])
 
 export default clerkMiddleware(async (auth, req) => {

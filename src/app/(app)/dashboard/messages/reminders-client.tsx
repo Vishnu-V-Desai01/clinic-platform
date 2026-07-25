@@ -42,8 +42,8 @@ interface RemindersClientProps {
   overageRatePaise: number;
 }
 
-function TypeBadge({ type }: { type: "registration" | "receipt" }) {
-  const config = {
+function TypeBadge({ type }: { type: "registration" | "receipt" | "appointment" }) {
+  const config: Record<string, { className: string; label: string }> = {
     registration: {
       className: "bg-sky-500/15 text-sky-700 dark:text-sky-400 border-0",
       label: "Registration",
@@ -52,8 +52,12 @@ function TypeBadge({ type }: { type: "registration" | "receipt" }) {
       className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-0",
       label: "Receipt",
     },
+    appointment: {
+      className: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border-0",
+      label: "Appointment",
+    },
   };
-  const { className, label } = config[type];
+  const { className, label } = config[type] || config.registration;
   return <Badge className={className}>{label}</Badge>;
 }
 
@@ -194,7 +198,7 @@ export function RemindersClient({
                   <div className="flex-1 space-y-2 min-w-0">
                     <p className="font-medium text-foreground truncate">{msg.patientName}</p>
                     <div className="flex flex-wrap items-center gap-2">
-                      <TypeBadge type={msg.type} />
+                      <TypeBadge type={msg.type as "registration" | "receipt" | "appointment"} />
                       <span className="text-sm text-muted-foreground">{msg.phone}</span>
                     </div>
                     <Badge variant="secondary" className="text-xs border-0">
