@@ -19,11 +19,26 @@ export async function GET(
   const supabase = createServerSupabaseClient();
   const profile  = await getOrCreateProfile();
 
-  if (!profile || !['doctor', 'staff'].includes(profile.role)) {
+  if (!profile) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 
-  const { data: payment, error } = await supabase
+  const isClinicMember = profile.role === 'doctor' || profile.role === 'staff';
+  const isPatient      = profile.role === 'patient';
+
+  if (!isClinicMember && !isPatient) {
+    return new NextResponse('Forbidden', { status: 403 });
+  }
+
+  // Doctor/staff: scoped to their own clinic via clinic_id, exactly as
+  // before. Patient: NOT scoped by clinic_id here — patients always have
+  // clinic_id = null on their profile, so that filter would exclude every
+  // row. Ownership for patients is instead enforced by the
+  // payments_select_patient_own RLS policy (added Chat 21, Step 3), which
+  // only returns rows where patient_id belongs to one of the caller's own
+  // family_account_id cards. A mismatched payment simply returns no row,
+  // falling through to the same 404 doctor/staff get for a wrong clinic_id.
+  let paymentQuery = supabase
     .from('payments')
     .select(
       `*, patients (first_name, last_name, patient_id_number),
@@ -34,26 +49,40 @@ export async function GET(
          payment_method, transaction_reference
        )`
     )
-    .eq('id', paymentId)
-    .eq('clinic_id', profile.clinic_id)
-    .single();
+    .eq('id', paymentId);
+
+  if (isClinicMember) {
+    paymentQuery = paymentQuery.eq('clinic_id', profile.clinic_id);
+  }
+
+  const { data: payment, error } = await paymentQuery.single();
 
   if (error || !payment) {
     return new NextResponse('Payment not found', { status: 404 });
   }
 
+  // Uses payment.clinic_id, not profile.clinic_id — for doctor/staff these
+  // are already guaranteed identical by the filter above, so this is a
+  // no-op change for them. For patients (profile.clinic_id is null) this
+  // is the actual fix: it resolves the real clinic regardless of caller role.
   const { data: clinic } = await supabase
     .from('clinics')
     .select('name, address, city, state, postal_code, phone, email, license_number, gst_number, hfr_id, show_branding_footer')
-    .eq('id', profile.clinic_id)
+    .eq('id', payment.clinic_id)
     .single();
 
-  // Fetch line items — backward compatible (may be empty for old charges)
+  // Fetch line items — backward compatible (may be empty for old charges).
+  // Same payment.clinic_id fix as the clinic lookup above. Note: if
+  // payment_line_items' own RLS policies (Chat 10) don't yet include a
+  // patient-facing SELECT policy, this will simply return empty for a
+  // patient caller — hasLineItems below already handles that gracefully
+  // by falling back to the single-description rendering, so this doesn't
+  // break the receipt, just potentially renders it less itemized.
   const { data: lineItemsRaw } = await supabase
     .from('payment_line_items')
     .select('*')
     .eq('payment_id', paymentId)
-    .eq('clinic_id', profile.clinic_id)
+    .eq('clinic_id', payment.clinic_id)
     .order('sort_order', { ascending: true });
 
   const lineItems: any[]  = lineItemsRaw || [];
@@ -69,7 +98,7 @@ export async function GET(
     const margin = 40;
     const inner  = width - margin * 2;
 
-    // ── Design tokens ──────────────────────────────────────────────
+    // ── Design tokens ─────────────────────────────────────────────
     const teal     = rgb(0.05, 0.52, 0.52);
     const tealDk   = rgb(0.03, 0.38, 0.38);
     const tealTint = rgb(0.92, 0.98, 0.98);
@@ -101,7 +130,7 @@ export async function GET(
 
     const collections: any[] = payment.payment_collections || [];
 
-    // ── 1. HEADER ─────────────────────────────────────────────────
+    // ── 1. HEADER ──────────────────────────────────────────────────
     const HH = 90;
     page.drawRectangle({ x: 0, y: height - HH, width, height: HH, color: teal });
     page.drawRectangle({ x: 0, y: height - 5,  width, height: 5,  color: tealDk });
@@ -147,7 +176,7 @@ export async function GET(
       size: 38, font: fontBold, color: white, opacity: 0.10,
     });
 
-    // ── 2. META BAR ───────────────────────────────────────────────
+    // ── 2. META BAR ────────────────────────────────────────────────
     const MB  = 40;
     const mbY = height - HH - MB;
     page.drawRectangle({ x: 0, y: mbY, width, height: MB, color: tealTint });
@@ -238,7 +267,7 @@ export async function GET(
     );
     y -= 22;
 
-    // ── 4. ITEMISED BILL TABLE (only when line items exist) ───────
+    // ── 4. ITEMISED BILL TABLE (only when line items exist) ────────
     if (hasLineItems) {
       // Section label
       page.drawText('ITEMISED BILL', {
@@ -521,7 +550,7 @@ export async function GET(
       y -= 8;
     }
 
-    // ── 7. FOOTER ─────────────────────────────────────────────────
+    // ── 7. FOOTER ──────────────────────────────────────────────────
     const ftY = 48;
     page.drawLine({
       start: { x: margin, y: ftY + 30 },

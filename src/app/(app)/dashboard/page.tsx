@@ -15,7 +15,7 @@ export default async function DashboardPage() {
   }
 
   if (profile.role === 'doctor' || profile.role === 'staff') {
-    redirect('/dashboard/patients')
+    redirect('/dashboard/overview')
   }
 
   // Patient placeholder — Chat 21 builds the real dashboard

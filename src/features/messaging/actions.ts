@@ -137,7 +137,7 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
     CLINIC_NAME: clinic.name,
     PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
     EMAIL: patient.email,
-    LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient/login`,
+   LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient-portal`,
   };
 
   const { data: inserted, error: insertError } = await supabase

@@ -5,10 +5,8 @@ import { requireRole } from '@/lib/supabase/profile'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import {
   requestFamilyAccessSchema,
-  respondToAccessRequestSchema,
   accessGrantIdSchema,
   type RequestFamilyAccessInput,
-  type RespondToAccessRequestInput,
 } from './schema'
 import type { AccessGrant, FamilyAccessRequestView, FamilyPatientCard } from './types'
 
@@ -22,13 +20,8 @@ const GRANT_DURATION_DAYS = 7
 // DOCTOR-SIDE: request access to a family's records
 // ============================================================
 
-// A doctor requests access using the family's "Unique Family ID"
-// (shown on the family's dashboard, shared with the doctor however
-// the patient chooses to). This only ever creates a pending
-// request — nothing is visible to the doctor until the family
-// responds and picks a specific card.
 export async function requestFamilyAccess(
-  input: RequestFamilyAccessInput
+  input: RequestFamilyAccessInput,
 ): Promise<ActionResult<AccessGrant>> {
   const profile = await requireRole('doctor')
 
@@ -41,7 +34,7 @@ export async function requestFamilyAccess(
 
   const { data: familyAccountIdRaw, error: resolveError } = await supabase.rpc(
     'resolve_family_account_code',
-    { p_code: parsed.data.familyCode }
+    { p_code: parsed.data.familyCode },
   )
 
   if (resolveError) {
@@ -49,7 +42,6 @@ export async function requestFamilyAccess(
   }
 
   const familyAccountId = familyAccountIdRaw as string | null
-
   if (!familyAccountId) {
     return { success: false, error: 'No family found with that Unique Family ID' }
   }
@@ -81,15 +73,12 @@ export async function requestFamilyAccess(
     return { success: false, error: `Failed to send access request: ${insertError.message}` }
   }
 
-  // Placeholder path — this route doesn't exist yet (Chat 21 UI).
-  revalidatePath('/dashboard/patient-history')
-
+  revalidatePath('/dashboard')
   return { success: true, data: grant as AccessGrant }
 }
 
 export async function listMyAccessRequests(): Promise<ActionResult<AccessGrant[]>> {
   const profile = await requireRole('doctor')
-
   const supabase = createServerSupabaseClient()
 
   const { data, error } = await supabase
@@ -98,15 +87,18 @@ export async function listMyAccessRequests(): Promise<ActionResult<AccessGrant[]
     .eq('requesting_doctor_id', profile.id)
     .order('requested_at', { ascending: false })
 
-  if (error) {
-    return { success: false, error: `Failed to load your requests: ${error.message}` }
-  }
-
-  return { success: true, data: data as AccessGrant[] }
+  if (error) return { success: false, error: error.message }
+  return { success: true, data: (data ?? []) as AccessGrant[] }
 }
 
+// NOTE: doctor-side "respond to my own outgoing request" isn't needed —
+// a doctor doesn't respond to their own request; the family does
+// (approveAccessRequest / denyAccessRequest below). Doctor-side UI for
+// viewing request status lives in Chat 22 and reads listMyAccessRequests()
+// above; nothing further is needed here for that.
+
 // ============================================================
-// FAMILY-SIDE: review requests, grant/deny/revoke access
+// PATIENT-SIDE: list + respond to access requests
 // ============================================================
 
 export async function listAccessRequestsForMyFamily(): Promise<ActionResult<FamilyAccessRequestView[]>> {
@@ -116,9 +108,7 @@ export async function listAccessRequestsForMyFamily(): Promise<ActionResult<Fami
 
   const { data, error } = await supabase.rpc('list_access_requests_for_my_family')
 
-  if (error) {
-    return { success: false, error: `Failed to load access requests: ${error.message}` }
-  }
+  if (error) return { success: false, error: error.message }
 
   const rows = (data ?? []) as {
     id: string
@@ -155,9 +145,7 @@ export async function listMyFamilyPatientCards(): Promise<ActionResult<FamilyPat
 
   const { data, error } = await supabase.rpc('list_my_family_patient_cards')
 
-  if (error) {
-    return { success: false, error: `Failed to load patient cards: ${error.message}` }
-  }
+  if (error) return { success: false, error: error.message }
 
   const rows = (data ?? []) as {
     id: string
@@ -179,135 +167,79 @@ export async function listMyFamilyPatientCards(): Promise<ActionResult<FamilyPat
   }
 }
 
-// Approves a pending request and attaches the specific card the
-// family manager chose. status and granted_patient_id are set in
-// the SAME update deliberately — the
-// patient_access_grants_card_requires_response CHECK constraint
-// only allows granted_patient_id to be non-null once status is
-// approved/revoked/expired, so setting them in two separate writes
-// would fail on the first one.
-//
-// NOTE: only reachable through the app as written — the
-// .eq('status', 'pending') filter below is what stops a family
-// member from re-approving an already-responded request with a
-// different card. RLS itself doesn't block that (it only checks the
-// card belongs to their own family), so someone calling the
-// Supabase API directly, bypassing this action, technically could.
-// Since it's only ever their own family's data being touched — not
-// a cross-family leak — this is being accepted as a known minor
-// gap rather than added RLS complexity. Flag if you want it closed.
 export async function approveAccessRequest(
-  input: RespondToAccessRequestInput
+  raw: unknown,
+  patientId: string,
 ): Promise<ActionResult<null>> {
   await requireRole('patient')
 
-  const parsed = respondToAccessRequestSchema.safeParse(input)
+  const parsed = accessGrantIdSchema.safeParse(raw)
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+    return { success: false, error: 'Invalid request ID' }
   }
 
+  const grantId = parsed.data
   const supabase = createServerSupabaseClient()
 
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + GRANT_DURATION_DAYS)
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('patient_access_grants')
     .update({
       status: 'approved',
-      granted_patient_id: parsed.data.patientId,
-      responded_at: new Date().toISOString(),
+      granted_patient_id: patientId,
+      granted_at: new Date().toISOString(),
       expires_at: expiresAt.toISOString(),
     })
-    .eq('id', parsed.data.requestId)
-    .eq('status', 'pending')
-    .select()
-    .maybeSingle()
+    .eq('id', grantId)
 
-  if (error) {
-    return { success: false, error: `Failed to approve request: ${error.message}` }
-  }
+  if (error) return { success: false, error: error.message }
 
-  if (!data) {
-    return {
-      success: false,
-      error: 'Request not found, already responded to, or not yours to approve',
-    }
-  }
-
-  // Placeholder path — this route doesn't exist yet (Chat 21 UI).
-  revalidatePath('/dashboard/family')
-
+  revalidatePath('/portal')
   return { success: true, data: null }
 }
 
-export async function denyAccessRequest(requestId: string): Promise<ActionResult<null>> {
+export async function denyAccessRequest(raw: unknown): Promise<ActionResult<null>> {
   await requireRole('patient')
 
-  const parsed = accessGrantIdSchema.safeParse(requestId)
+  const parsed = accessGrantIdSchema.safeParse(raw)
   if (!parsed.success) {
     return { success: false, error: 'Invalid request ID' }
   }
 
+  const grantId = parsed.data
   const supabase = createServerSupabaseClient()
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('patient_access_grants')
-    .update({
-      status: 'denied',
-      responded_at: new Date().toISOString(),
-    })
-    .eq('id', requestId)
-    .eq('status', 'pending')
-    .select()
-    .maybeSingle()
+    .update({ status: 'denied' })
+    .eq('id', grantId)
 
-  if (error) {
-    return { success: false, error: `Failed to deny request: ${error.message}` }
-  }
+  if (error) return { success: false, error: error.message }
 
-  if (!data) {
-    return {
-      success: false,
-      error: 'Request not found, already responded to, or not yours to deny',
-    }
-  }
-
-  revalidatePath('/dashboard/family')
-
+  revalidatePath('/portal')
   return { success: true, data: null }
 }
 
-// Ends an already-approved grant early, before its 7-day window
-// naturally expires. Doesn't touch granted_patient_id — the CHECK
-// constraint still allows it to stay set once status is 'revoked'.
-export async function revokeAccessGrant(requestId: string): Promise<ActionResult<null>> {
+export async function revokeAccessGrant(raw: unknown): Promise<ActionResult<null>> {
   await requireRole('patient')
 
-  const parsed = accessGrantIdSchema.safeParse(requestId)
+  const parsed = accessGrantIdSchema.safeParse(raw)
   if (!parsed.success) {
-    return { success: false, error: 'Invalid request ID' }
+    return { success: false, error: 'Invalid grant ID' }
   }
 
+  const grantId = parsed.data
   const supabase = createServerSupabaseClient()
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('patient_access_grants')
     .update({ status: 'revoked' })
-    .eq('id', requestId)
-    .eq('status', 'approved')
-    .select()
-    .maybeSingle()
+    .eq('id', grantId)
 
-  if (error) {
-    return { success: false, error: `Failed to revoke access: ${error.message}` }
-  }
+  if (error) return { success: false, error: error.message }
 
-  if (!data) {
-    return { success: false, error: 'Grant not found, or not currently active' }
-  }
-
-  revalidatePath('/dashboard/family')
-
+  revalidatePath('/portal')
   return { success: true, data: null }
 }

@@ -6,9 +6,8 @@ import {
 
 // Dedicated entry point for patients arriving via the WhatsApp
 // "view your dashboard" link. Kept separate from "/" on purpose —
-// see the note in page.tsx for why. This route only ever runs the
-// patient-claim path, never clinic creation, so that collision
-// can't happen here.
+// this route only ever runs the patient-claim path, never clinic
+// creation, so that collision can't happen here.
 export default async function PatientPortalPage() {
   const profile = await getOrCreateProfile()
 
@@ -16,12 +15,14 @@ export default async function PatientPortalPage() {
     if (profile.status !== 'active') {
       redirect('/account-suspended')
     }
-    redirect('/dashboard')
+    // Patients have their own shell; everyone else gets the clinical shell.
+    redirect(profile.role === 'patient' ? '/portal' : '/dashboard')
   }
 
   const claimedProfile = await claimFamilyAccountAndCreatePatientProfile()
   if (claimedProfile) {
-    redirect('/dashboard')
+    // New claim: always a patient role — send to patient home.
+    redirect('/portal')
   }
 
   return (
@@ -29,8 +30,8 @@ export default async function PatientPortalPage() {
       <div className="max-w-md space-y-2 text-center">
         <h1 className="text-2xl font-semibold">No patient record found</h1>
         <p className="text-sm text-muted-foreground">
-          We couldn't find a patient record matching your account's email
-          address. Please check with your clinic to confirm the email
+          We couldn&apos;t find a patient record matching your account&apos;s
+          email address. Please check with your clinic to confirm the email
           they registered you with.
         </p>
       </div>
