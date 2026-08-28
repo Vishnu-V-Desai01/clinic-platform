@@ -4,7 +4,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getOrCreateProfile, requireRole } from '@/lib/supabase/profile';
+import { getOrCreateProfile, requireRole, requireAdmin } from '@/lib/supabase/profile';
 import { UpdateClinicSettingsSchema } from './schema';
 import type { ClinicSettings } from './types';
 import type { z } from 'zod';
@@ -14,6 +14,8 @@ export async function getClinicSettings(): Promise<ClinicSettings | null> {
   const profile = await getOrCreateProfile();
   if (!profile) return null;
 
+  // Viewing clinic identity stays open to any doctor/staff — it's read-only
+  // display, not the edit path. Editing is admin-only; see updateClinicSettings.
   await requireRole('doctor', 'staff');
 
   const { data, error } = await supabase
@@ -38,7 +40,11 @@ export async function updateClinicSettings(
     const profile = await getOrCreateProfile();
     if (!profile) return { success: false, error: 'Profile not found' };
 
-    await requireRole('doctor');
+    // Clinic identity (name, address, GST/license numbers, receipt
+    // branding) is admin-only to edit, not "any doctor." Previously this
+    // checked role === 'doctor' only, which let a non-admin doctor at a
+    // multi-doctor clinic change details stamped on every receipt.
+    await requireAdmin();
 
     const validatedInput = UpdateClinicSettingsSchema.parse(input);
 

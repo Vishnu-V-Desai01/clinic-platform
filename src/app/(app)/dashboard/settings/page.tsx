@@ -1,17 +1,16 @@
 // src/app/(app)/dashboard/settings/page.tsx
-
 export const dynamic = 'force-dynamic';
-
 import { Settings } from 'lucide-react';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
 import { getClinicSettings } from '@/features/clinic/actions';
+import { getAutoSendMedicineReceiptsSetting } from '@/features/pharmacy/actions';
 import ClinicSettingsForm from '@/features/clinic/components/clinic-settings-form';
+import PharmacyMessagingSettingsCard from '@/features/pharmacy/components/pharmacy-messaging-settings-card';
 
 export const metadata = { title: 'Clinic Settings' };
 
 export default async function SettingsPage() {
   const profile = await getOrCreateProfile();
-
   if (!profile || !['doctor', 'staff'].includes(profile.role)) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -19,9 +18,7 @@ export default async function SettingsPage() {
       </div>
     );
   }
-
   const clinic = await getClinicSettings();
-
   if (!clinic) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -31,13 +28,23 @@ export default async function SettingsPage() {
       </div>
     );
   }
+  // Admin-only edit, not "any doctor" — matches the requireAdmin() guard now
+  // enforced in updateClinicSettings. A non-admin doctor/staff member still
+  // sees the page (read access is fine) but the form renders view-only.
+  const canEdit = profile.is_clinic_admin;
 
-  const canEdit = profile.role === 'doctor';
+  // Independent from the clinic-identity form above: gated by
+  // is_clinic_admin (any admin — doctor or staff), not role === 'doctor'.
+  // A failed fetch degrades to hiding the card rather than breaking the
+  // whole settings page, matching how the pharmacy dashboard handles the
+  // same "module might not be enabled" possibility elsewhere.
+  const autoSendResult = await getAutoSendMedicineReceiptsSetting();
+  const autoSendMedicineReceipts = autoSendResult.ok ? autoSendResult.data : null;
 
   return (
     <div className="p-4 md:p-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-center gap-3 mb-8">
+      <div className="max-w-2xl mx-auto space-y-8">
+        <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Settings className="size-5" />
           </div>
@@ -54,6 +61,13 @@ export default async function SettingsPage() {
         </div>
 
         <ClinicSettingsForm clinic={clinic} canEdit={canEdit} />
+
+        {autoSendMedicineReceipts !== null && (
+          <PharmacyMessagingSettingsCard
+            initialAutoSend={autoSendMedicineReceipts}
+            canEdit={profile.is_clinic_admin}
+          />
+        )}
       </div>
     </div>
   );

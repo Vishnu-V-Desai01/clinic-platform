@@ -28,7 +28,7 @@ export async function generateAndStorePaymentDocuments(
     return [];
   }
 
-  requireRole('doctor', 'staff');
+  await requireRole('doctor', 'staff');
 
   const { data: payment, error: paymentError } = await supabase
     .from('payments')
@@ -168,7 +168,7 @@ export async function getDocumentDownloadUrl(
     return null;
   }
 
-  requireRole('doctor', 'staff');
+  await requireRole('doctor', 'staff');
 
   const { data: doc, error: fetchError } = await supabase
     .from('documents')
@@ -214,7 +214,7 @@ export async function getReceiptDownloadUrlForPayment(
     return null;
   }
 
-  requireRole('doctor', 'staff');
+  await requireRole('doctor', 'staff');
 
   const { data: doc, error } = await supabase
     .from('documents')
@@ -258,7 +258,7 @@ export async function listPaymentDocuments(paymentId: string): Promise<Document[
     return [];
   }
 
-  requireRole('doctor', 'staff');
+  await requireRole('doctor', 'staff');
 
   const { data, error } = await supabase
     .from('documents')
@@ -287,7 +287,7 @@ export async function listPatientDocuments(patientId: string): Promise<Document[
     return [];
   }
 
-  requireRole('doctor', 'staff');
+  await requireRole('doctor', 'staff');
 
   const { data, error } = await supabase
     .from('documents')

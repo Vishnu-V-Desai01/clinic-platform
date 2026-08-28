@@ -15,6 +15,12 @@ export type Profile = {
   staff_type: 'receptionist' | 'nurse' | 'assistant' | 'pharmacist' | null
   status: 'active' | 'suspended' | 'removed'
   has_admin_onboarded: boolean
+  // Admin-granted permission to manage pharmacy inventory and dispense
+  // medicine. Independent of role/staff_type — is_clinic_admin implies this
+  // too, but that's resolved separately wherever access is checked, not
+  // folded into this field itself. See am_i_pharmacy_user() in Postgres and
+  // assertPharmacyReader/assertPharmacyWriter in src/features/pharmacy/actions.ts.
+  pharmacy_access: boolean
 }
 
 export async function getOrCreateProfile(): Promise<Profile | null> {
@@ -145,4 +151,20 @@ export async function requireRole<T extends Role[]>(
     redirect('/account-suspended')
   }
   return profile as Profile & { role: T[number] }
+}
+
+// requireAdmin: for clinic-admin-only surfaces (the /dashboard/admin route
+// group and its server actions). role alone (doctor/staff) is NOT enough —
+// is_clinic_admin is the actual admin flag. A non-admin doctor or staff
+// member must be redirected the same as an unauthenticated user; the route
+// existing is not something we confirm to them.
+export async function requireAdmin(): Promise<Profile & { is_clinic_admin: true }> {
+  const profile = await getOrCreateProfile()
+  if (!profile || !(profile.role === 'doctor' || profile.role === 'staff') || !profile.is_clinic_admin) {
+    redirect('/')
+  }
+  if (profile.status !== 'active') {
+    redirect('/account-suspended')
+  }
+  return profile as Profile & { is_clinic_admin: true }
 }
