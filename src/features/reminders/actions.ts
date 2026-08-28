@@ -6,7 +6,9 @@ import { requireRole } from '@/lib/supabase/profile'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────
 
 export type MedicineReminder = {
   id:               string
@@ -37,7 +39,9 @@ export type MedicineWithoutReminder = {
   duration:      string | null
 }
 
-// ─── Zod schemas ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Zod schemas
+// ─────────────────────────────────────────────────────────────────────────
 
 const addReminderSchema = z.object({
   patientId:       z.string().uuid(),
@@ -58,7 +62,9 @@ const updateReminderSchema = z.object({
 export type AddReminderInput    = z.infer<typeof addReminderSchema>
 export type UpdateReminderInput = z.infer<typeof updateReminderSchema>
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────
 
 function buildReminderText(medicineName: string, mealAssociation?: string | null): string {
   if (!mealAssociation) return `Remember to take ${medicineName}`
@@ -66,7 +72,9 @@ function buildReminderText(medicineName: string, mealAssociation?: string | null
   return `Remember to take ${medicineName} ${readable}`
 }
 
-// ─── listRemindersForPatient ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// listRemindersForPatient
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Returns all medicine reminders for a patient, ordered by reminder time.
@@ -147,7 +155,9 @@ export async function listRemindersForPatient(
   }
 }
 
-// ─── addReminder ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// addReminder
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Adds a medicine reminder for a patient.
@@ -223,7 +233,9 @@ export async function addReminder(
   }
 }
 
-// ─── updateReminder ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// updateReminder
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Updates an existing medicine reminder.
@@ -237,7 +249,7 @@ export async function updateReminder(
     const v       = updateReminderSchema.parse(input)
     const supabase = createServerSupabaseClient()
 
-    // Verify ownership — reminder must belong to this clinic
+    // Verify ownership – reminder must belong to this clinic
     const { data: existing, error: fetchError } = await supabase
       .from('care_plan_reminders')
       .select('id, medicine_name, meal_association')
@@ -281,7 +293,9 @@ export async function updateReminder(
   }
 }
 
-// ─── deleteReminder ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// deleteReminder
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Permanently removes a medicine reminder.
@@ -313,7 +327,9 @@ export async function deleteReminder(
   }
 }
 
-// ─── getMedicinesWithoutReminders ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// getMedicinesWithoutReminders
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Returns medicines in the clinic that have no active reminders set.
@@ -404,18 +420,21 @@ export async function getMedicinesWithoutReminders(): Promise<MedicinesResult> {
   }
 }
 
-// ─── getDueReminders ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// getDueReminders
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Called by the cron job. Returns reminders due to be sent right now (IST).
  * A reminder is due when:
- *   1. enabled = true
- *   2. reminder_type = 'medicine'
- *   3. reminder_time matches current IST hour:minute
- *   4. last_sent_at is NOT today (prevents duplicate sends)
- *   5. today is within [start_date, start_date + duration_days] (or ongoing if null)
+ *   1. clinic_id matches the querying clinic (explicit scope — defence in depth)
+ *   2. enabled = true
+ *   3. reminder_type = 'medicine'
+ *   4. reminder_time matches current IST hour:minute
+ *   5. last_sent_at is NOT today (prevents duplicate sends)
+ *   6. today is within [start_date, start_date + duration_days] (or ongoing if null)
  *
- * Uses service role key — not callable by end users, only the cron route.
+ * Uses service role key – not callable by end users, only the cron route.
  */
 export async function getDueReminders(nowIST: Date): Promise<{
   success: true
@@ -429,6 +448,7 @@ export async function getDueReminders(nowIST: Date): Promise<{
   }>
 } | { success: false; error: string }> {
   try {
+    const profile = await requireRole('doctor', 'staff')
     const supabase = createServerSupabaseClient()
 
     // Current IST time as HH:MM
@@ -451,6 +471,7 @@ export async function getDueReminders(nowIST: Date): Promise<{
         last_sent_at,
         care_plans ( patient_id )
       `)
+      .eq('clinic_id', profile.clinic_id)
       .eq('reminder_type', 'medicine')
       .eq('enabled', true)
       .eq('reminder_time', currentTime)
@@ -497,14 +518,22 @@ export async function getDueReminders(nowIST: Date): Promise<{
   }
 }
 
-// ─── markReminderSent ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// markReminderSent
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Updates last_sent_at on a reminder after successful WhatsApp send.
  * Called by the cron job only.
+ *
+ * Added clinic_id parameter for explicit clinic scoping (defence in depth):
+ * even though the cron route has x-cron-secret authentication, this adds
+ * a targeted guard at the action layer to prevent cross-clinic updates if
+ * the cron route's auth mechanism ever malfunctions.
  */
 export async function markReminderSent(
   reminderId: string,
+  clinicId: string,
 ): Promise<void> {
   try {
     const supabase = createServerSupabaseClient()
@@ -512,6 +541,7 @@ export async function markReminderSent(
       .from('care_plan_reminders')
       .update({ last_sent_at: new Date().toISOString() })
       .eq('id', reminderId)
+      .eq('clinic_id', clinicId)
   } catch (err) {
     console.error('[markReminderSent]', err)
   }
