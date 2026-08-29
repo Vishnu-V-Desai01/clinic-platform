@@ -51,6 +51,72 @@ function formatPhoneWithCountryCode(phone: string, countryCode: string): string 
   return phone.startsWith(code) ? phone : `${code}${phone}`;
 }
 
+// ── Message visibility scoping (Issue 3, re-scoped) ─────────────────────────
+//
+// Visibility now mirrors WHICH doctor the message's underlying record
+// actually belongs to, not the patient's primary assignment — matching
+// the re-scoped patients/payments policies. A doctor sees:
+//   - 'appointment' messages: where the linked appointment's doctor_id = them
+//   - 'receipt' / 'medicine_receipt' messages: where the linked payment's
+//     doctor_id = them
+//   - 'registration' messages: where the patient's assigned_doctor_id = them
+//     (registration has no appointment/payment to key off of, so it falls
+//     back to primary assignment)
+// Admin and staff see everything, unrestricted.
+//
+// getMessageClusters relies on the message_queue_doctor_scoped_select RLS
+// policy (which implements this exact same type-conditional logic at the
+// database layer) rather than duplicating it in application code — the
+// list queries below are correct as long as RLS is correct, without a
+// parallel per-type filter that could drift out of sync with the policy.
+//
+// isMessageVisibleToDoctor is used ONLY for sendMessage/cancelMessage —
+// single-record mutations where an explicit ownership check is worth the
+// extra query as defence in depth, even though RLS already covers it.
+async function isMessageVisibleToDoctor(
+  supabase: ReturnType<typeof createServerSupabaseClient>,
+  profile: { id: string; role: string; is_clinic_admin: boolean },
+  message: { type: string; patient_id: string; appointment_id: string | null; payment_id: string | null }
+): Promise<boolean> {
+  if (profile.is_clinic_admin || profile.role === 'staff') return true;
+
+  if (message.type === 'appointment') {
+    if (!message.appointment_id) return false;
+    const { data } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('id', message.appointment_id)
+      .eq('doctor_id', profile.id)
+      .maybeSingle();
+    return !!data;
+  }
+
+  if (message.type === 'receipt' || message.type === 'medicine_receipt') {
+    if (!message.payment_id) return false;
+    const { data } = await supabase
+      .from('payments')
+      .select('id')
+      .eq('id', message.payment_id)
+      .eq('doctor_id', profile.id)
+      .maybeSingle();
+    return !!data;
+  }
+
+  if (message.type === 'registration') {
+    const { data } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('id', message.patient_id)
+      .eq('assigned_doctor_id', profile.id)
+      .maybeSingle();
+    return !!data;
+  }
+
+  // Unknown message type: fail closed rather than assume visibility.
+  console.error('[isMessageVisibleToDoctor] unrecognized message type:', message.type);
+  return false;
+}
+
 export type ReadyMessage = {
   id: string;
   patientName: string;
@@ -484,6 +550,18 @@ export async function sendMessage(input: SendMessageInput) {
     return { success: false, error: "Message not found" };
   }
 
+  // Ownership check (defence in depth alongside message_queue_doctor_scoped_*
+  // RLS policies) — a doctor must only be able to send messages tied to a
+  // record they're the doctor on (appointment/payment), or a registration
+  // message for a patient assigned to them. Even if called directly with
+  // a known id, this independently re-verifies rather than trusting RLS
+  // alone for a mutating action.
+  const visible = await isMessageVisibleToDoctor(supabase, profile, message);
+  if (!visible) {
+    console.error("[sendMessage] doctor attempted to send a message they are not the doctor on");
+    return { success: false, error: "Message not found" };
+  }
+
   if (message.status !== "pending") {
     return { success: false, error: `Message is already ${message.status}, cannot send again` };
   }
@@ -568,6 +646,11 @@ export async function sendAllMessages(input: SendAllMessagesInput) {
   const errors: { messageId: string; error: string }[] = [];
 
   for (const messageId of messageIds) {
+    // sendMessage independently re-checks permission per id (see ownership
+    // check inside it) — this loop does NOT trust that the caller's list
+    // was already filtered to permitted messages. A doctor's client could
+    // in principle submit ids for messages outside their scope; each one
+    // is rejected individually here rather than assumed valid.
     const result = await sendMessage({ messageId });
     if (result.success) {
       succeeded++;
@@ -591,11 +674,19 @@ export async function cancelMessage(input: CancelMessageInput) {
 
   const { data: message, error: fetchError } = await supabase
     .from("message_queue")
-    .select("id, clinic_id, status")
+    .select("id, clinic_id, patient_id, appointment_id, payment_id, type, status")
     .eq("id", messageId)
     .single();
 
   if (fetchError || !message) {
+    return { success: false, error: "Message not found" };
+  }
+
+  // Ownership check (defence in depth alongside message_queue_doctor_scoped_*
+  // RLS policies) — same rule as sendMessage above.
+  const visible = await isMessageVisibleToDoctor(supabase, profile, message);
+  if (!visible) {
+    console.error("[cancelMessage] doctor attempted to cancel a message they are not the doctor on");
     return { success: false, error: "Message not found" };
   }
 
@@ -675,6 +766,13 @@ export async function getClinicMessageUsage(): Promise<{
 
 // ============================================================================
 // expireOverdueAppointmentMessages
+//
+// Deliberately clinic-wide, NOT doctor-scoped. This is a housekeeping
+// side-effect (marking stale pending appointment messages as expired), not
+// a read or send action — restricting it by doctor could leave a doctor's
+// own stale messages un-expired if a staff member (whose queue view is
+// clinic-wide) happens to load the page first and runs this before that
+// doctor ever does. Confirmed with product owner (Issue 3 audit).
 // ============================================================================
 export async function expireOverdueAppointmentMessages() {
   await requireRole("doctor", "staff");
@@ -713,16 +811,26 @@ export async function getMessageClusters(): Promise<{
   scheduled: ScheduledReminder[];
   archive: ArchiveMessage[];
 }> {
-  await requireRole("doctor", "staff");
-  const supabase = createServerSupabaseClient();
   const profile = await requireRole("doctor", "staff");
+  const supabase = createServerSupabaseClient();
 
-  // Expire overdue appointment messages first
+  // Expire overdue appointment messages first (clinic-wide — see comment
+  // on expireOverdueAppointmentMessages above)
   await expireOverdueAppointmentMessages();
+
+  // Doctor-scoping is enforced by the message_queue_doctor_scoped_select
+  // RESTRICTIVE RLS policy, which implements the exact same type-conditional
+  // logic as isMessageVisibleToDoctor above (appointment/payment/patient
+  // ownership per message type). Deliberately NOT duplicated here as a
+  // parallel JS filter — for a single table with type-dependent visibility,
+  // re-deriving three different per-type id lists client-side is both more
+  // code and a real risk of silently drifting out of sync with the policy.
+  // clinic_id scoping below is still explicit (defence in depth for the
+  // clinic boundary specifically, same as every other query in this file).
 
   // Fetch all three clusters in parallel
   const [readyData, scheduledData, archiveData] = await Promise.all([
-    // Ready to Send: ALL pending messages (registration, receipt, appointment)
+    // Ready to Send: ALL pending messages (registration, receipt, appointment, medicine_receipt)
     supabase
       .from("message_queue")
       .select("*")
@@ -781,4 +889,134 @@ export async function getMessageClusters(): Promise<{
     scheduled,
     archive,
   };
+}
+
+// ============================================================================
+// createMedicineReceiptMessage
+//
+// Mirrors createReceiptMessage above, but for medicine payments specifically.
+// createReceiptMessage hard-requires BOTH a 'receipt' and a
+// 'treatment_details' document — a medicine payment will only ever produce
+// a single 'medicine_receipt' document, so that function can never succeed
+// for a medicine payment. This is the parallel path with only one required
+// document and one placeholder (RECEIPT_LINK; no TREATMENT_PDF_LINK).
+//
+// generateAndStoreMedicineReceipt is imported lazily inside the function
+// body (not at module top) to avoid a module-load-time dependency from the
+// messaging feature on the pharmacy feature — only pulled in when a
+// medicine receipt message is actually being created.
+// ============================================================================
+export async function createMedicineReceiptMessage(input: CreateReceiptMessageInput) {
+  const profile = await requireRole("doctor", "staff");
+  const { paymentId } = createReceiptMessageInputSchema.parse(input);
+  const supabase = createServerSupabaseClient();
+
+  const { data: existingMessage } = await supabase
+    .from("message_queue")
+    .select("id")
+    .eq("payment_id", paymentId)
+    .eq("type", "medicine_receipt")
+    .in("status", ["pending", "sent"])
+    .maybeSingle();
+
+  if (existingMessage) {
+    return { success: true, messageId: existingMessage.id, alreadyExisted: true };
+  }
+
+  const { data: payment, error: paymentError } = await supabase
+    .from("payments")
+    .select("id, clinic_id, patient_id, approval_status, payment_source")
+    .eq("id", paymentId)
+    .single();
+
+  if (paymentError || !payment) {
+    return { success: false, error: "Payment not found" };
+  }
+
+  if (payment.payment_source !== "medicine") {
+    return { success: false, error: "This is not a medicine payment" };
+  }
+
+  if (payment.approval_status !== "approved") {
+    return { success: false, error: "Cannot send receipt message — payment has not been approved yet" };
+  }
+
+  const { data: patient, error: patientError } = await supabase
+    .from("patients")
+    .select("id, first_name, last_name, phone, language_preference")
+    .eq("id", payment.patient_id)
+    .single();
+
+  if (patientError || !patient) {
+    return { success: false, error: "Patient not found" };
+  }
+
+  if (!patient.phone) {
+    return { success: false, error: "Patient has no phone number on file" };
+  }
+
+  const { data: clinic, error: clinicError } = await supabase
+    .from("clinics")
+    .select("id, name, country_code")
+    .eq("id", payment.clinic_id)
+    .single();
+
+  if (clinicError || !clinic) {
+    return { success: false, error: "Clinic not found" };
+  }
+
+  const phoneWithCountryCode = formatPhoneWithCountryCode(
+    patient.phone,
+    clinic.country_code || 'IN'
+  );
+
+  const { generateAndStoreMedicineReceipt } = await import("@/features/pharmacy/document-storage");
+  const receiptDoc = await generateAndStoreMedicineReceipt(paymentId);
+
+  if (!receiptDoc) {
+    return { success: false, error: "Could not generate or find the medicine receipt document" };
+  }
+
+  const receiptToken = await getOrCreateActivePublicLink(supabase, receiptDoc.id, payment.clinic_id, profile.id);
+
+  if (!receiptToken) {
+    return { success: false, error: "Failed to create a public download link for the receipt" };
+  }
+
+  const placeholders: Record<string, string> = {
+    PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
+    CLINIC_NAME: clinic.name,
+    RECEIPT_LINK: buildPublicDocumentUrl(receiptToken),
+  };
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("message_queue")
+    .insert({
+      clinic_id: payment.clinic_id,
+      patient_id: patient.id,
+      payment_id: payment.id,
+      type: "medicine_receipt",
+      language: patient.language_preference,
+      phone: phoneWithCountryCode,
+      placeholders,
+      status: "pending",
+      scheduled_send_time: new Date().toISOString(),
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+
+  if (insertError || !inserted) {
+    return { success: false, error: insertError?.message ?? "Failed to queue medicine receipt message" };
+  }
+
+  await supabase.from("message_delivery_logs").insert({
+    clinic_id: payment.clinic_id,
+    message_queue_id: inserted.id,
+    action: "created",
+    performed_by: profile.id,
+  });
+
+  revalidatePath("/dashboard/messages");
+  return { success: true, messageId: inserted.id };
 }

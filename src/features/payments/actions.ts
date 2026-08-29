@@ -66,6 +66,34 @@ function resolveDoctorId(
   return { error: 'Please select a doctor.' };
 }
 
+// ── Payment visibility scoping (Issue 2, re-scoped) ─────────────────────────
+//
+// Admin and staff see all clinic payments. A doctor sees only payments
+// where THEY are the doctor on that payment (payments.doctor_id) — not
+// payments for "their" patients in general. This deliberately does NOT
+// route through patients.assigned_doctor_id: Doctor B doing a one-off
+// charge for Doctor A's patient must see that payment in their own view,
+// since they're the one who actually performed the billed service. This
+// is query-layer defence in depth — the RLS policy
+// payments_select_clinic_staff_doctor enforces the same rule at the
+// database layer independently.
+//
+// Returns { restricted: false } for admin/staff. Returns
+// { restricted: true, doctorId } for a doctor — callers filter with
+// .eq('doctor_id', doctorId), a direct column match with no subquery.
+type DoctorScope =
+  | { restricted: false }
+  | { restricted: true; doctorId: string };
+
+function getPaymentVisibilityScope(
+  profile: { id: string; role: string; is_clinic_admin: boolean }
+): DoctorScope {
+  if (profile.is_clinic_admin || profile.role === 'staff') {
+    return { restricted: false };
+  }
+  return { restricted: true, doctorId: profile.id };
+}
+
 // ── Read functions ────────────────────────────────────────────────────────────
 
 export async function getPaymentWithCollections(
@@ -89,6 +117,15 @@ export async function getPaymentWithCollections(
     return null;
   }
 
+  // Direct-by-ID lookup: clinic_id scoping alone isn't enough for a doctor —
+  // verify this specific payment's doctor_id is actually them.
+  // Admin/staff bypass this (see getPaymentVisibilityScope).
+  const scope = getPaymentVisibilityScope(profile);
+  if (scope.restricted && (data as any).doctor_id !== scope.doctorId) {
+    console.error('[getPaymentWithCollections] doctor requested a payment they are not attributed on');
+    return null;
+  }
+
   return data as PaymentWithCollections;
 }
 
@@ -100,6 +137,22 @@ export async function getPaymentLineItems(
   if (!profile) return [];
 
   await requireRole('doctor', 'staff');
+
+  // Line items don't carry doctor_id directly — verify via the parent
+  // payment first, same rule as getPaymentWithCollections above.
+  const scope = getPaymentVisibilityScope(profile);
+  if (scope.restricted) {
+    const { data: parentPayment } = await supabase
+      .from('payments')
+      .select('doctor_id')
+      .eq('id', paymentId)
+      .eq('clinic_id', profile.clinic_id)
+      .maybeSingle();
+
+    if (!parentPayment || (parentPayment as any).doctor_id !== scope.doctorId) {
+      return [];
+    }
+  }
 
   const { data, error } = await supabase
     .from('payment_line_items')
@@ -128,6 +181,7 @@ export async function listPayments(filters?: {
 
   await requireRole('doctor', 'staff');
 
+  const scope = getPaymentVisibilityScope(profile);
   let query = supabase
     .from('payments')
     .select(
@@ -150,6 +204,8 @@ export async function listPayments(filters?: {
     )
     .eq('clinic_id', profile.clinic_id)
     .order('created_at', { ascending: false });
+
+  if (scope.restricted) query = query.eq('doctor_id', scope.doctorId);
 
   if (filters?.approval_status) query = query.eq('approval_status', filters.approval_status);
   if (filters?.payment_status) query = query.eq('payment_status', filters.payment_status);
@@ -186,11 +242,13 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
 
   await requireRole('doctor', 'staff');
 
-  const { data, error } = await supabase
+  const scope = getPaymentVisibilityScope(profile);
+  let query = supabase
     .from('payments')
     .select(
       `
       id,
+      patient_id,
       amount_charged,
       description,
       created_at,
@@ -203,6 +261,10 @@ export async function getPendingApprovalPayments(): Promise<PendingChargeView[]>
     .eq('clinic_id', profile.clinic_id)
     .eq('approval_status', 'pending')
     .order('created_at', { ascending: true });
+
+  if (scope.restricted) query = query.eq('doctor_id', scope.doctorId);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('[getPendingApprovalPayments]', error);
@@ -234,11 +296,13 @@ export async function getApprovedOutstandingCharges(): Promise<ApprovedChargeVie
 
   await requireRole('doctor', 'staff');
 
-  const { data, error } = await supabase
+  const scope = getPaymentVisibilityScope(profile);
+  let query = supabase
     .from('payments')
     .select(
       `
       id,
+      patient_id,
       outstanding_balance,
       description,
       patients (first_name, last_name, patient_id_number),
@@ -249,6 +313,10 @@ export async function getApprovedOutstandingCharges(): Promise<ApprovedChargeVie
     .eq('approval_status', 'approved')
     .in('payment_status', ['unpaid', 'partial'])
     .order('created_at', { ascending: true });
+
+  if (scope.restricted) query = query.eq('doctor_id', scope.doctorId);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('[getApprovedOutstandingCharges]', error);
@@ -313,11 +381,13 @@ export async function getPaymentsDashboardData(): Promise<{
 
   await requireRole('doctor', 'staff');
 
-  const { data, error } = await supabase
+  const scope = getPaymentVisibilityScope(profile);
+  let query = supabase
     .from('payments')
     .select(
       `
       id,
+      patient_id,
       amount_charged,
       amount_paid,
       outstanding_balance,
@@ -332,6 +402,10 @@ export async function getPaymentsDashboardData(): Promise<{
     )
     .eq('clinic_id', profile.clinic_id)
     .order('created_at', { ascending: false });
+
+  if (scope.restricted) query = query.eq('doctor_id', scope.doctorId);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('[getPaymentsDashboardData]', error);
@@ -1135,7 +1209,8 @@ export async function getOutstandingPayments() {
 
   await requireRole('doctor', 'staff');
 
-  const { data, error } = await supabase
+  const scope = getPaymentVisibilityScope(profile);
+  let query = supabase
     .from('payments')
     .select(
       `*, patients (first_name, last_name),
@@ -1147,6 +1222,10 @@ export async function getOutstandingPayments() {
     .eq('approval_status', 'approved')
     .in('payment_status', ['unpaid', 'partial'])
     .order('created_at', { ascending: true });
+
+  if (scope.restricted) query = query.eq('doctor_id', scope.doctorId);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('[getOutstandingPayments]', error);
@@ -1167,11 +1246,36 @@ export async function getPaymentAlerts(filters?: {
 
   await requireRole('doctor', 'staff');
 
+  // payment_alerts has no doctor_id column of its own (only payment_id,
+  // patient_id, appointment_id) — scoping has to go via the parent
+  // payment's doctor_id, resolved as an id list first rather than a
+  // direct .eq(), since there's no column to filter on directly.
+  const scope = getPaymentVisibilityScope(profile);
+  let restrictedPaymentIds: string[] | null = null;
+
+  if (scope.restricted) {
+    const { data: ownPayments, error: ownPaymentsError } = await supabase
+      .from('payments')
+      .select('id')
+      .eq('clinic_id', profile.clinic_id)
+      .eq('doctor_id', scope.doctorId);
+
+    if (ownPaymentsError) {
+      console.error('[getPaymentAlerts] failed to resolve doctor scope', ownPaymentsError);
+      return [];
+    }
+
+    restrictedPaymentIds = (ownPayments ?? []).map((p) => p.id);
+    if (restrictedPaymentIds.length === 0) return [];
+  }
+
   let query = supabase
     .from('payment_alerts')
     .select('*')
     .eq('clinic_id', profile.clinic_id)
     .order('alert_created_at', { ascending: false });
+
+  if (restrictedPaymentIds) query = query.in('payment_id', restrictedPaymentIds);
 
   if (filters?.alert_type) query = query.eq('alert_type', filters.alert_type);
   if (filters?.escalation_level) query = query.eq('escalation_level', filters.escalation_level);
