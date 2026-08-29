@@ -804,6 +804,48 @@ export async function expireOverdueAppointmentMessages() {
 }
 
 // ============================================================================
+// suppressAppointmentMessages (Issue 4)
+//
+// Called when an appointment transitions to completed or cancelled.
+// Wraps the suppress_appointment_messages() SECURITY DEFINER RPC — that
+// function does its own clinic-id check but deliberately does NOT check
+// that the calling doctor owns the appointment, since the callers
+// (cancelAppointment / updateAppointmentStatus in appointments/actions.ts)
+// don't currently enforce that ownership check either. Using a RESTRICTIVE-
+// RLS-bound update here would silently no-op for a doctor completing
+// another doctor's appointment, defeating the fix for exactly the
+// cross-doctor case Issues 2/3 exist to handle correctly.
+//
+// Marks (not deletes) pending 'appointment' type messages as cancelled —
+// registration/receipt/medicine_receipt messages never carry
+// appointment_id, so they're excluded by construction, not by an
+// additional type filter that could be gotten wrong.
+// ============================================================================
+export async function suppressAppointmentMessages(
+  appointmentId: string
+): Promise<{ success: true; suppressedCount: number } | { success: false; error: string }> {
+  const profile = await requireRole("doctor", "staff");
+  const supabase = createServerSupabaseClient();
+
+  const { data, error } = await supabase.rpc("suppress_appointment_messages", {
+    p_appointment_id: appointmentId,
+    p_actor_id: profile.id,
+  });
+
+  if (error) {
+    console.error("[suppressAppointmentMessages]", error);
+    return { success: false, error: error.message };
+  }
+
+  const suppressedCount = (data as number) ?? 0;
+  if (suppressedCount > 0) {
+    revalidatePath("/dashboard/messages");
+  }
+
+  return { success: true, suppressedCount };
+}
+
+// ============================================================================
 // getMessageClusters
 // ============================================================================
 export async function getMessageClusters(): Promise<{
@@ -833,14 +875,14 @@ export async function getMessageClusters(): Promise<{
     // Ready to Send: ALL pending messages (registration, receipt, appointment, medicine_receipt)
     supabase
       .from("message_queue")
-      .select("*")
+      .select("*, appointments(status)")
       .eq("clinic_id", profile.clinic_id)
       .eq("status", "pending")
       .order("created_at", { ascending: true }),
     // Scheduled Reminders: upcoming appointment reminders (scheduled_send_time in future)
     supabase
       .from("message_queue")
-      .select("*")
+      .select("*, appointments(status)")
       .eq("clinic_id", profile.clinic_id)
       .eq("status", "pending")
       .eq("type", "appointment")
@@ -855,25 +897,43 @@ export async function getMessageClusters(): Promise<{
       .order("created_at", { ascending: false }),
   ]);
 
-  const ready: ReadyMessage[] = (readyData.data || []).map((msg: any) => ({
-    id: msg.id,
-    patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
-    phone: msg.phone,
-    type: msg.type,
-    language: msg.language,
-    status: msg.status,
-    createdAt: msg.created_at,
-  }));
+  // Defensive filter (Issue 4): excludes appointment-type messages whose
+  // linked appointment is already completed/cancelled. Primarily a safety
+  // net for rows created BEFORE this fix shipped — suppressAppointmentMessages
+  // now marks these cancelled going forward at the moment of completion, so
+  // this filter should rarely have anything to catch on new data, but
+  // covers any pre-existing stale rows or a suppression call that failed
+  // silently. Only applies to type === 'appointment'; other message types
+  // have no linked appointment and pass through unaffected.
+  function isStaleAppointmentMessage(msg: any): boolean {
+    if (msg.type !== "appointment") return false;
+    const linkedStatus = msg.appointments?.status;
+    return linkedStatus === "completed" || linkedStatus === "cancelled";
+  }
 
-  const scheduled: ScheduledReminder[] = (scheduledData.data || []).map((msg: any) => ({
-    id: msg.id,
-    patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
-    doctorName: msg.placeholders?.DOCTOR_NAME || "your doctor",
-    appointmentDate: msg.placeholders?.APPOINTMENT_DATE || "Unknown",
-    appointmentTime: msg.placeholders?.APPOINTMENT_TIME || "Unknown",
-    scheduledSendTime: msg.scheduled_send_time,
-    status: msg.status,
-  }));
+  const ready: ReadyMessage[] = (readyData.data || [])
+    .filter((msg: any) => !isStaleAppointmentMessage(msg))
+    .map((msg: any) => ({
+      id: msg.id,
+      patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
+      phone: msg.phone,
+      type: msg.type,
+      language: msg.language,
+      status: msg.status,
+      createdAt: msg.created_at,
+    }));
+
+  const scheduled: ScheduledReminder[] = (scheduledData.data || [])
+    .filter((msg: any) => !isStaleAppointmentMessage(msg))
+    .map((msg: any) => ({
+      id: msg.id,
+      patientName: msg.placeholders?.PATIENT_NAME || "Unknown",
+      doctorName: msg.placeholders?.DOCTOR_NAME || "your doctor",
+      appointmentDate: msg.placeholders?.APPOINTMENT_DATE || "Unknown",
+      appointmentTime: msg.placeholders?.APPOINTMENT_TIME || "Unknown",
+      scheduledSendTime: msg.scheduled_send_time,
+      status: msg.status,
+    }));
 
   const archive: ArchiveMessage[] = (archiveData.data || []).map((msg: any) => ({
     id: msg.id,

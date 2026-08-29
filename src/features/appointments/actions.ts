@@ -12,12 +12,30 @@
 //
 // Chat 19: toListItem() now returns doctorId so the appointments list
 // can gate "Mark as Complete" to the logged-in doctor's own rows.
+//
+// Issue 4 (debugging chat): cancelAppointment and updateAppointmentStatus
+// now call suppressAppointmentMessages() when an appointment transitions
+// to cancelled/completed, so stale "Ready to send" appointment messages
+// (confirmation + day-of reminder) don't linger after the visit is over
+// or scrubbed. Failures are logged but non-fatal to the status change
+// itself — the appointment transition is the important part; message
+// cleanup is best-effort, same pattern as receipt-message queuing
+// elsewhere in the codebase.
+//
+// KNOWN GAP (flagged, not fixed in this pass): updateAppointmentStatus
+// only checks requireRole('doctor') and clinic_id — it does NOT verify
+// the calling doctor is the one assigned to this specific appointment
+// (existing.doctor_id). Any doctor in the clinic can currently mark any
+// other doctor's appointment complete. suppressAppointmentMessages()
+// works correctly regardless, since it goes through a SECURITY DEFINER
+// RPC that doesn't depend on the caller owning the appointment — but the
+// underlying status-change permission gap itself is a separate issue.
 
 "use server"
 
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-import { createAppointmentMessage } from "@/features/messaging/actions"
+import { createAppointmentMessage, suppressAppointmentMessages } from "@/features/messaging/actions"
 
 import {
   cancelAppointmentSchema,
@@ -485,6 +503,16 @@ export async function cancelAppointment(
 
     if (error) throw error
 
+    // Issue 4: suppress any still-pending confirmation/day-of reminder
+    // messages for this appointment now that it's cancelled. Best-effort —
+    // the cancellation itself already succeeded and committed above; a
+    // suppression failure shouldn't be reported as if the cancel failed.
+    try {
+      await suppressAppointmentMessages(appointmentId)
+    } catch (err) {
+      console.error("[cancelAppointment] Message suppression failed:", err)
+    }
+
     return { success: true, data: undefined }
   } catch (err) {
     console.error("[cancelAppointment]", err)
@@ -535,6 +563,20 @@ export async function updateAppointmentStatus(
       .single()
 
     if (error) throw error
+
+    // Issue 4: suppress any still-pending confirmation/day-of reminder
+    // messages when the appointment is marked completed (or, via this
+    // same function, any other terminal-ish status change). Only actually
+    // removes rows when they exist — a no-op for statuses like
+    // 'in_progress' that don't correspond to "the visit is over."
+    // Best-effort: the status update already committed above.
+    if (data.status === "completed") {
+      try {
+        await suppressAppointmentMessages(appointmentId)
+      } catch (err) {
+        console.error("[updateAppointmentStatus] Message suppression failed:", err)
+      }
+    }
 
     return { success: true, data: updated as AppointmentRecord }
   } catch (err) {
