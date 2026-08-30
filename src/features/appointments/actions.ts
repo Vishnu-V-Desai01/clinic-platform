@@ -22,6 +22,12 @@
 // cleanup is best-effort, same pattern as receipt-message queuing
 // elsewhere in the codebase.
 //
+// Issue 5 follow-up (this chat): rescheduleAppointment now also suppresses
+// the stale appointment message (queued against the OLD date/time) and
+// queues a fresh one reflecting the new date/time — same
+// suppressAppointmentMessages()/createAppointmentMessage() pair Issue 4
+// already established.
+//
 // KNOWN GAP (flagged, not fixed in this pass): updateAppointmentStatus
 // only checks requireRole('doctor') and clinic_id — it does NOT verify
 // the calling doctor is the one assigned to this specific appointment
@@ -447,6 +453,39 @@ export async function rescheduleAppointment(
       .single()
 
     if (error) throw error
+
+    // Reschedule confirmation (this chat): the old confirmation/reminder
+    // message (queued against the OLD date/time) is now stale and would
+    // either send with wrong info or sit uselessly in the queue. Suppress
+    // any still-pending appointment message for this appointment, then
+    // queue a fresh one — createAppointmentMessage re-reads the
+    // appointment row (now updated) and computes placeholders + a new
+    // scheduled_send_time from the NEW date/time. Reuses the existing
+    // appointment-message template/wording per the confirmed design — no
+    // new "rescheduled" template. Best-effort/non-fatal: the reschedule
+    // itself already succeeded and committed above.
+    // NOTE: both of these RETURN a { success, error } result on business-
+    // logic failure (missing phone, wrong status, etc.) rather than
+    // throwing — a plain try/catch around them silently swallows that kind
+    // of failure, since no exception is ever thrown to catch. Checking
+    // .success explicitly here so a real failure reason actually reaches
+    // the server log instead of vanishing.
+    try {
+      const suppressResult = await suppressAppointmentMessages(appointmentId)
+      if (!suppressResult.success) {
+        console.error("[rescheduleAppointment] Stale message suppression failed:", suppressResult.error)
+      }
+    } catch (err) {
+      console.error("[rescheduleAppointment] Stale message suppression threw:", err)
+    }
+    try {
+      const createResult = await createAppointmentMessage({ appointmentId })
+      if (!createResult.success) {
+        console.error("[rescheduleAppointment] New appointment message failed:", createResult.error)
+      }
+    } catch (err) {
+      console.error("[rescheduleAppointment] New appointment message threw:", err)
+    }
 
     return { success: true, data: updated as AppointmentRecord }
   } catch (err) {

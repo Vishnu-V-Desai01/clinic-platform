@@ -8,6 +8,15 @@
 //       userRole    === 'doctor'      AND
 //       appt.doctorId === currentUserId   (own appointment only)
 //   - Actions column widened to min-w-[280px] to fit the new button.
+//
+// Issue 5 (debugging chat): added isClinicAdmin prop + EditVisitButton.
+//   - Renders EditVisitButton for status === 'completed' when:
+//       isClinicAdmin === true, OR
+//       (userRole === 'doctor' && appt.doctorId === currentUserId), OR
+//       userRole === 'staff'
+//     (staff only ever get the Charges step inside the modal itself —
+//     this button's visibility is UX only; getVisitPrefill/completeVisit
+//     independently re-verify permission server-side either way.)
 
 "use client"
 
@@ -61,6 +70,7 @@ import NewAppointmentDialog, { type PatientOption } from "./new-appointment-dial
 import RescheduleDialog  from "./reschedule-dialog"
 import CancelDialog      from "./cancel-dialog"
 import { MarkCompleteButton } from "@/features/post-visit"
+import EditVisitButton from "@/features/post-visit/components/EditVisitButton"
 
 const PAGE_SIZE = 10
 
@@ -112,6 +122,10 @@ interface AppointmentsListProps {
   userRole:      string
   /** Supabase profile.id of the logged-in user — to gate own-appointment check. */
   currentUserId: string
+  /** Issue 5: profile.is_clinic_admin — admins can edit ANY completed
+   *  appointment, not just their own. Parent server component must pass
+   *  this through from getOrCreateProfile()/requireRole(). */
+  isClinicAdmin: boolean
 }
 
 export default function AppointmentsList({
@@ -120,6 +134,7 @@ export default function AppointmentsList({
   doctors,
   userRole,
   currentUserId,
+  isClinicAdmin,
 }: AppointmentsListProps) {
   const router = useRouter()
 
@@ -237,7 +252,7 @@ export default function AppointmentsList({
                   <TableHead className="min-w-[190px]">Date &amp; Time</TableHead>
                   <TableHead className="min-w-[100px]">Duration</TableHead>
                   <TableHead className="min-w-[120px]">Status</TableHead>
-                  {/* Widened to fit Mark as Complete button */}
+                  {/* Widened to fit Mark as Complete / Edit Visit buttons */}
                   <TableHead className="min-w-[280px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -266,6 +281,19 @@ export default function AppointmentsList({
                       appt.status     === "scheduled" &&
                       userRole        === "doctor"    &&
                       appt.doctorId   === currentUserId
+
+                    // Issue 5: show "Edit Visit" for completed appointments
+                    // when the caller is an admin (any appointment), the
+                    // treating doctor (their own), or staff (charges-only,
+                    // enforced inside the modal). Server independently
+                    // re-verifies in getVisitPrefill/completeVisit either way.
+                    const showEditVisit =
+                      appt.status === "completed" &&
+                      (
+                        isClinicAdmin ||
+                        (userRole === "doctor" && appt.doctorId === currentUserId) ||
+                        userRole === "staff"
+                      )
 
                     return (
                       <TableRow key={appt.id}>
@@ -314,6 +342,15 @@ export default function AppointmentsList({
                             {/* Mark as Complete — doctor's own scheduled appointment */}
                             {showMarkComplete && (
                               <MarkCompleteButton
+                                appointmentId={appt.id}
+                                patientName={appt.patientName}
+                                variant="outline"
+                              />
+                            )}
+
+                            {/* Edit Visit — completed appointment, per Issue 5 permission rule */}
+                            {showEditVisit && (
+                              <EditVisitButton
                                 appointmentId={appt.id}
                                 patientName={appt.patientName}
                                 variant="outline"

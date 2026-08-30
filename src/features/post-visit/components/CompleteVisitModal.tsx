@@ -1,8 +1,23 @@
 // src/features/post-visit/components/CompleteVisitModal.tsx
+//
+// Issue 5 additions:
+//   - Stores the permission/status flags from the prefill (canEditClinical,
+//     canEditCharges, chargesRequireApproval, chargesLocked, encounterId,
+//     appointmentStatus) in a separate `meta` state alongside the editable
+//     WizardState — these describe what the CALLER is allowed to do, not
+//     wizard content, so they don't belong in WizardState itself.
+//   - When canEditClinical is false (staff, or a non-treating/non-admin
+//     doctor — though the latter never reaches this modal), the
+//     Prescriptions/Reminders/Encounter steps are removed from the wizard
+//     entirely rather than shown-then-rejected on save. Staff go straight
+//     to Charges → Review.
+//   - Header shows "Editing a completed visit" when encounterId is present
+//     (re-edit) vs the original "Complete Visit" title (first-time).
+//   - ChargesCard/ReviewCard receive the locked/requiresApproval flags.
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react'
 import {
   Dialog,
@@ -36,46 +51,76 @@ interface CompleteVisitModalProps {
   onComplete?:   () => void
 }
 
+// Permission/status metadata from the prefill — describes what the CALLER
+// can do, not wizard content, so it's kept separate from WizardState.
+type VisitMeta = {
+  appointmentStatus:      string
+  encounterId?:           string
+  canEditClinical:        boolean
+  canEditCharges:         boolean
+  chargesLocked:          boolean
+  chargesRequireApproval: boolean
+}
+
 function makeInitialState(
   appointmentId: string,
   prefill:       VisitPrefill,
 ): WizardState {
+  const firstStep = prefill.canEditClinical ? WIZARD_STEPS[0] : 'charges'
+
   return {
     appointmentId,
     patientId:   prefill.patientId,
-    currentStep: WIZARD_STEPS[0],
+    currentStep: firstStep,
     skipped:     [],
     prescriptions: prefill.prescriptions,
     reminderTimes: prefill.reminderTimes,
-    encounter: {
+    // Issue 5 (edit mode): prefill.encounterData is only present when
+    // editing an already-completed visit — use it as-is so
+    // diagnosisId/observationId/notes round-trip correctly. First-time
+    // completion still starts blank.
+    encounter: prefill.encounterData ?? {
       chiefComplaint: undefined,
       notes:          undefined,
       diagnoses:      [],
       observations:   [],
     },
-    charges: prefill.defaultFee != null
-      ? [{
-          localId:     crypto.randomUUID(),
-          description: 'Consultation fee',
-          quantity:    1,
-          unitPrice:   prefill.defaultFee,
-        }]
-      : [],
+    // Issue 5 (edit mode): if this visit already has charges saved, start
+    // from those (whether editable or locked — display either way).
+    // First-time completion keeps the original behavior: a single
+    // consultation-fee line pre-filled from the clinic default, if any.
+    charges: prefill.existingCharges.length > 0
+      ? prefill.existingCharges
+      : prefill.defaultFee != null
+        ? [{
+            localId:     crypto.randomUUID(),
+            description: 'Consultation fee',
+            quantity:    1,
+            unitPrice:   prefill.defaultFee,
+          }]
+        : [],
   }
 }
 
-function buildPayload(state: WizardState): CompleteVisitPayload {
+function buildPayload(state: WizardState, meta: VisitMeta): CompleteVisitPayload {
   const { skipped } = state
+
+  // Steps not offered at all (canEditClinical === false) are treated the
+  // same as explicitly skipped — null, not touched on save — since they
+  // were never shown, not because the user chose to skip them.
+  const clinicalStepsOffered = meta.canEditClinical
 
   return {
     appointmentId: state.appointmentId,
     patientId:     state.patientId,
 
-    prescriptions: skipped.includes('prescriptions')
+    prescriptions: (!clinicalStepsOffered || skipped.includes('prescriptions'))
       ? null
       : state.prescriptions.map((rx) => ({
           carePlanMedicineId: rx.carePlanMedicineId,
+          prescriptionId:     rx.prescriptionId,
           medicineName:       rx.medicineName,
+          drugId:             rx.drugId,
           dosage:             rx.dosage,
           frequency:          rx.frequency,
           duration:           rx.duration,
@@ -86,7 +131,7 @@ function buildPayload(state: WizardState): CompleteVisitPayload {
           isDeleted:          rx.isDeleted,
         })),
 
-    reminderTimes: skipped.includes('reminders')
+    reminderTimes: (!clinicalStepsOffered || skipped.includes('reminders'))
       ? null
       : state.reminderTimes.map((r) => ({
           medicineName:    r.medicineName,
@@ -95,22 +140,26 @@ function buildPayload(state: WizardState): CompleteVisitPayload {
           mealAssociation: r.mealAssociation,
         })),
 
-    encounter: skipped.includes('encounter')
+    encounter: (!clinicalStepsOffered || skipped.includes('encounter'))
       ? null
       : {
           chiefComplaint: state.encounter.chiefComplaint,
           notes:          state.encounter.notes,
           diagnoses: state.encounter.diagnoses.map((d) => ({
+            diagnosisId:   d.diagnosisId,
             conditionName: d.conditionName,
             severity:      d.severity,
             status:        d.status,
             notes:         d.notes,
+            isDeleted:     d.isDeleted,
           })),
           observations: state.encounter.observations.map((o) => ({
+            observationId:   o.observationId,
             observationType: o.observationType,
             value:           o.value,
             unit:            o.unit,
             notes:           o.notes,
+            isDeleted:       o.isDeleted,
           })),
         },
 
@@ -124,29 +173,24 @@ function buildPayload(state: WizardState): CompleteVisitPayload {
   }
 }
 
-const STEPPER_STEPS: WizardStep[] = [
-  'prescriptions',
-  'reminders',
-  'encounter',
-  'charges',
-]
-
 function Stepper({
+  visibleSteps,
   currentStep,
   skipped,
 }: {
-  currentStep: WizardStep
-  skipped:     WizardStep[]
+  visibleSteps: WizardStep[]
+  currentStep:  WizardStep
+  skipped:      WizardStep[]
 }) {
-  const currentIdx = WIZARD_STEPS.indexOf(currentStep)
-  const isReview   = currentStep === 'review'
+  const orderedSteps: WizardStep[] = visibleSteps.filter((s) => s !== 'review')
+  const currentIdx   = orderedSteps.indexOf(currentStep)
+  const isReview     = currentStep === 'review'
 
   return (
     <div className="flex items-start px-8 pb-5 pt-4">
-      {STEPPER_STEPS.map((step, idx) => {
-        const stepIdx    = WIZARD_STEPS.indexOf(step)
+      {orderedSteps.map((step, idx) => {
         const isActive   = !isReview && currentStep === step
-        const isComplete = isReview || stepIdx < currentIdx
+        const isComplete = isReview || idx < currentIdx
         const isSkipped  = skipped.includes(step)
 
         return (
@@ -175,7 +219,7 @@ function Stepper({
               </span>
             </div>
 
-            {idx < STEPPER_STEPS.length - 1 && (
+            {idx < orderedSteps.length - 1 && (
               <div
                 className={cn(
                   'mt-3.5 h-px flex-1 transition-colors',
@@ -199,6 +243,7 @@ export default function CompleteVisitModal({
 }: CompleteVisitModalProps) {
 
   const [wizardState,    setWizardState]    = useState<WizardState | null>(null)
+  const [meta,            setMeta]          = useState<VisitMeta | null>(null)
   const [prefillLoading, setPrefillLoading] = useState(false)
   const [prefillError,   setPrefillError]   = useState<string | null>(null)
   const [isSaving,       setIsSaving]       = useState(false)
@@ -209,6 +254,7 @@ export default function CompleteVisitModal({
 
     let aborted = false
     setWizardState(null)
+    setMeta(null)
     setSaveResult(null)
     setPrefillError(null)
     setPrefillLoading(true)
@@ -221,6 +267,14 @@ export default function CompleteVisitModal({
         return
       }
       setWizardState(makeInitialState(appointmentId, result.data))
+      setMeta({
+        appointmentStatus:      result.data.appointmentStatus,
+        encounterId:            result.data.encounterId,
+        canEditClinical:        result.data.canEditClinical,
+        canEditCharges:         result.data.canEditCharges,
+        chargesLocked:          result.data.chargesLocked,
+        chargesRequireApproval: result.data.chargesRequireApproval,
+      })
     })
 
     return () => { aborted = true }
@@ -232,18 +286,28 @@ export default function CompleteVisitModal({
     [],
   )
 
-  const currentStep = wizardState?.currentStep ?? WIZARD_STEPS[0]
-  const currentIdx  = WIZARD_STEPS.indexOf(currentStep)
-  const isSkippable = SKIPPABLE_STEPS.includes(currentStep)
+  // The steps actually offered to this caller — clinical steps are
+  // entirely absent (not disabled) when canEditClinical is false.
+  const visibleSteps = useMemo<WizardStep[]>(() => {
+    if (!meta) return WIZARD_STEPS
+    if (meta.canEditClinical) return WIZARD_STEPS
+    return ['charges', 'review']
+  }, [meta])
+
+  const currentStep = wizardState?.currentStep ?? visibleSteps[0]
+  const currentIdx  = visibleSteps.indexOf(currentStep)
+  const isSkippable = SKIPPABLE_STEPS.includes(currentStep) && currentStep !== 'charges'
+    ? SKIPPABLE_STEPS.includes(currentStep)
+    : currentStep === 'charges' && !meta?.chargesLocked
   const isReview    = currentStep === 'review'
 
   const goBack = () => {
-    if (currentIdx > 0) patch({ currentStep: WIZARD_STEPS[currentIdx - 1] })
+    if (currentIdx > 0) patch({ currentStep: visibleSteps[currentIdx - 1] })
   }
 
   const goNext = () => {
-    if (currentIdx < WIZARD_STEPS.length - 1)
-      patch({ currentStep: WIZARD_STEPS[currentIdx + 1] })
+    if (currentIdx < visibleSteps.length - 1)
+      patch({ currentStep: visibleSteps[currentIdx + 1] })
   }
 
   const skipStep = () => {
@@ -251,16 +315,16 @@ export default function CompleteVisitModal({
     const newSkipped = wizardState.skipped.includes(currentStep)
       ? wizardState.skipped
       : [...wizardState.skipped, currentStep]
-    const nextStep = currentIdx < WIZARD_STEPS.length - 1
-      ? WIZARD_STEPS[currentIdx + 1]
+    const nextStep = currentIdx < visibleSteps.length - 1
+      ? visibleSteps[currentIdx + 1]
       : currentStep
     setWizardState({ ...wizardState, skipped: newSkipped, currentStep: nextStep })
   }
 
   const handleCompleteVisit = async () => {
-    if (!wizardState || isSaving) return
+    if (!wizardState || !meta || isSaving) return
     setIsSaving(true)
-    const result = await completeVisit(buildPayload(wizardState))
+    const result = await completeVisit(buildPayload(wizardState, meta))
     setIsSaving(false)
 
     if (result.success && !(result.warnings?.length)) {
@@ -279,9 +343,12 @@ export default function CompleteVisitModal({
     if (wasSuccess) onComplete?.()
   }
 
-  const showWizard    = !!wizardState && !prefillLoading && saveResult === null
+  const showWizard    = !!wizardState && !!meta && !prefillLoading && saveResult === null
   const showWarnState = saveResult !== null && saveResult.success === true && (saveResult.warnings?.length ?? 0) > 0
   const showErrState  = saveResult !== null && saveResult.success === false
+
+  const isEditMode = !!meta?.encounterId
+  const modalTitle  = isEditMode ? 'Edit Visit Details' : 'Complete Visit'
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
@@ -292,7 +359,7 @@ export default function CompleteVisitModal({
       >
         <DialogHeader className="border-b border-border px-6 py-4">
           <DialogTitle className="text-base font-semibold leading-none">
-            Complete Visit
+            {modalTitle}
             <span className="ml-1.5 font-normal text-muted-foreground">
               — {patientName}
             </span>
@@ -301,6 +368,11 @@ export default function CompleteVisitModal({
             Record prescriptions, encounter notes, and charges for this visit,
             then mark it complete.
           </DialogDescription>
+          {isEditMode && !prefillLoading && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              This visit was already completed. Changes here update the saved record.
+            </p>
+          )}
         </DialogHeader>
 
         {prefillLoading && (
@@ -325,7 +397,9 @@ export default function CompleteVisitModal({
           <div className="flex flex-1 flex-col gap-4 px-6 py-8">
             <div className="flex items-center gap-3">
               <CheckCircle2 className="h-6 w-6 shrink-0 text-primary" />
-              <p className="font-semibold text-foreground">Visit completed</p>
+              <p className="font-semibold text-foreground">
+                {isEditMode ? 'Visit updated' : 'Visit completed'}
+              </p>
             </div>
 
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
@@ -364,10 +438,14 @@ export default function CompleteVisitModal({
           </div>
         )}
 
-        {showWizard && wizardState !== null && (
+        {showWizard && wizardState !== null && meta !== null && (
           <>
             <div className="border-b border-border">
-              <Stepper currentStep={currentStep} skipped={wizardState.skipped} />
+              <Stepper
+                visibleSteps={visibleSteps}
+                currentStep={currentStep}
+                skipped={wizardState.skipped}
+              />
             </div>
 
             <div className="relative flex-1 overflow-y-auto">
@@ -381,20 +459,20 @@ export default function CompleteVisitModal({
               )}
 
               <div className="p-6">
-                {currentStep === 'prescriptions' && (
+                {currentStep === 'prescriptions' && meta.canEditClinical && (
                   <PrescriptionsCard
                     value={wizardState.prescriptions}
                     onChange={(lines) => patch({ prescriptions: lines })}
                   />
                 )}
-                {currentStep === 'reminders' && (
+                {currentStep === 'reminders' && meta.canEditClinical && (
                   <RemindersCard
                     prescriptions={wizardState.prescriptions}
                     reminderTimes={wizardState.reminderTimes}
                     onReminderTimesChange={(times) => patch({ reminderTimes: times })}
                   />
                 )}
-                {currentStep === 'encounter' && (
+                {currentStep === 'encounter' && meta.canEditClinical && (
                   <EncounterCard
                     value={wizardState.encounter}
                     onChange={(enc) => patch({ encounter: enc })}
@@ -404,6 +482,8 @@ export default function CompleteVisitModal({
                   <ChargesCard
                     value={wizardState.charges}
                     onChange={(items) => patch({ charges: items })}
+                    locked={meta.chargesLocked}
+                    requiresApproval={meta.chargesRequireApproval}
                   />
                 )}
                 {currentStep === 'review' && (
@@ -414,6 +494,8 @@ export default function CompleteVisitModal({
                     charges={wizardState.charges}
                     skippedSteps={wizardState.skipped}
                     onEditStep={(step) => patch({ currentStep: step })}
+                    chargesLocked={meta.chargesLocked}
+                    chargesRequireApproval={meta.chargesRequireApproval}
                   />
                 )}
               </div>
@@ -429,7 +511,7 @@ export default function CompleteVisitModal({
                 ← Back
               </Button>
 
-              {isSkippable ? (
+              {isSkippable && !isReview ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -456,7 +538,7 @@ export default function CompleteVisitModal({
                       {isSaving && (
                         <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                       )}
-                      Skip &amp; Complete
+                      Skip &amp; {isEditMode ? 'Save' : 'Complete'}
                     </Button>
                     <Button
                       size="sm"
@@ -466,7 +548,7 @@ export default function CompleteVisitModal({
                       {isSaving && (
                         <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                       )}
-                      Complete Visit
+                      {isEditMode ? 'Save Changes' : 'Complete Visit'}
                     </Button>
                   </>
                 ) : (

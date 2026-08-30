@@ -39,13 +39,11 @@ import type { EncounterWithDetails } from "../types"
 import {
   COMMON_OBSERVATION_TYPES,
   DIAGNOSIS_STATUS_LABELS,
-  ENCOUNTER_STATUS_LABELS,
   PRESCRIPTION_STATUS_LABELS,
   TEST_RESULT_STATUS_LABELS,
 } from "../types"
 import {
   updateDiagnosisStatus,
-  updateEncounterStatus,
   updatePrescriptionStatus,
   updateTestResult,
 } from "../actions"
@@ -130,17 +128,6 @@ export default function EncounterDetailClient({
 
   const isDoctor = userRole === "doctor"
 
-  function handleMarkCompleted() {
-    setActionError(null)
-    startTransition(async () => {
-      const result = await updateEncounterStatus(encounter.id, {
-        status: "completed",
-      })
-      if ("error" in result) setActionError(result.error)
-      else router.refresh()
-    })
-  }
-
   function handleDiagnosisStatus(id: string, status: string) {
     setActionError(null)
     startTransition(async () => {
@@ -171,42 +158,23 @@ export default function EncounterDetailClient({
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
 
-      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-9 shrink-0 rounded-full"
-            aria-label="Go back to medical records"
-            onClick={() => router.push(`/dashboard/patients/${patientId}/records`)}
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Encounter
-            </h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {formatDate(encounter.encounter_date)} · {doctorName}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 sm:pt-1">
-          <StatusBadge
-            status={encounter.status}
-            label={ENCOUNTER_STATUS_LABELS[encounter.status]}
-          />
-          {isDoctor && encounter.status === "active" && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isPending}
-              onClick={handleMarkCompleted}
-            >
-              Mark Completed
-            </Button>
-          )}
+      <header className="mb-6 flex items-start gap-3">
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-9 shrink-0 rounded-full"
+          aria-label="Go back to medical records"
+          onClick={() => router.push(`/dashboard/patients/${patientId}/records`)}
+        >
+          <ArrowLeft className="size-4" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            Encounter
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {formatDate(encounter.encounter_date)} · {doctorName}
+          </p>
         </div>
       </header>
 

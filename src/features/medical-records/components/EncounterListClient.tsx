@@ -2,26 +2,9 @@
 
 import { useRouter } from "next/navigation"
 import { ArrowLeft, FileText, Plus } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import type { Encounter } from "../types"
-
-const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  active: {
-    label: "Active",
-    className: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
-  },
-  completed: {
-    label: "Completed",
-    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  },
-  cancelled: {
-    label: "Cancelled",
-    className: "bg-destructive/15 text-destructive",
-  },
-}
 
 const dateFormatter = new Intl.DateTimeFormat("en-IN", {
   day: "numeric",
@@ -32,24 +15,6 @@ const dateFormatter = new Intl.DateTimeFormat("en-IN", {
 function formatDate(iso: string) {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : dateFormatter.format(d)
-}
-
-function EncounterStatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] ?? {
-    label: status,
-    className: "bg-muted text-muted-foreground",
-  }
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "shrink-0 rounded-full border-transparent font-medium",
-        config.className,
-      )}
-    >
-      {config.label}
-    </Badge>
-  )
 }
 
 function EmptyState() {
@@ -176,7 +141,6 @@ export default function EncounterListClient({
                           </span>
                         )}
                       </p>
-                      <EncounterStatusBadge status={encounter.status} />
                     </div>
 
                     {encounter.notes && (

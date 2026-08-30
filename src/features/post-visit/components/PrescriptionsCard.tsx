@@ -7,15 +7,41 @@
 //   - skip newly-added rows that the doctor removed (no carePlanMedicineId)
 // No hardcoded data. Pre-fill comes from the wizard's initial state (seeded
 // by getVisitPrefill which reads care_plan_medicines).
+//
+// Chat B addition (objective 3): catalogue-backed prescribing.
+//   - Typing in the medicine name field shows a live autocomplete dropdown
+//     matching the clinic's pharmacy catalogue.
+//   - A "Select from inventory" button opens a search modal over the same
+//     catalogue for browsing rather than typing.
+//   - Either path sets drugId on the line, which the pharmacy queue later
+//     uses to match reliably instead of case-insensitive name matching.
+//   - drugId is set ONLY by an explicit selection (dropdown click or picker
+//     click) and is cleared by any manual keystroke in the name field —
+//     this keeps drugId from ever silently pointing at a name that no
+//     longer matches what's displayed.
+//   - Free text remains fully supported: a medicine not in the catalogue,
+//     or a handwritten-prescription case, just leaves drugId unset. The
+//     pharmacy queue shows these as "Not in catalogue," which is expected.
+//   - The picker deliberately does NOT show stock levels — it queries the
+//     catalogue only (pharmacy_drugs, doctor-visible per the Chat A RLS
+//     split), never pharmacy_inventory, so a doctor without pharmacy_access
+//     never sees stock data through this component.
 
 'use client'
 
-import { useState } from 'react'
-import { Pill, Plus, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ListFilter, Pill, Plus, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -23,6 +49,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { listDrugs } from '@/features/pharmacy/actions'
+import { PHARMACY_DRUG_FORM_LABELS, type PharmacyDrugRow } from '@/features/pharmacy/types'
 import type { PrescriptionLine } from '../types'
 
 interface PrescriptionsCardProps {
@@ -44,15 +72,71 @@ const FREQUENCY_OPTIONS = [
 
 const emptyForm = {
   medicineName: '',
+  drugId:       undefined as string | undefined,
   dosage:       '',
   frequency:    '',
   duration:     '',
   instructions: '',
 }
 
+const MAX_SUGGESTIONS = 6
+
+function drugDisplayLabel(drug: PharmacyDrugRow): string {
+  const parts = [drug.name]
+  if (drug.strength) parts[0] = `${drug.name} ${drug.strength}`
+  return parts[0]
+}
+
+function drugSubLabel(drug: PharmacyDrugRow): string {
+  const bits: string[] = [PHARMACY_DRUG_FORM_LABELS[drug.form]]
+  if (drug.generic_name) bits.push(drug.generic_name)
+  return bits.join(' · ')
+}
+
 export default function PrescriptionsCard({ value, onChange }: PrescriptionsCardProps) {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm]         = useState(emptyForm)
+
+  // Catalogue, fetched once. A doctor with no pharmacy_access still gets
+  // this list (catalogue read stays doctor-visible per Chat A's RLS split);
+  // an empty result (module disabled, or no drugs yet) just means the
+  // autocomplete/picker silently offer nothing — free text still works.
+  const [drugs, setDrugs]             = useState<PharmacyDrugRow[]>([])
+  const [drugsLoaded, setDrugsLoaded] = useState(false)
+
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const suggestionsBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [pickerOpen, setPickerOpen]     = useState(false)
+  const [pickerSearch, setPickerSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    listDrugs(false).then((result) => {
+      if (cancelled) return
+      if (result.ok) setDrugs(result.data)
+      setDrugsLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const suggestions = useMemo(() => {
+    const query = form.medicineName.trim().toLowerCase()
+    if (!query) return []
+    return drugs
+      .filter((d) => d.name.toLowerCase().includes(query))
+      .slice(0, MAX_SUGGESTIONS)
+  }, [drugs, form.medicineName])
+
+  const pickerResults = useMemo(() => {
+    const query = pickerSearch.trim().toLowerCase()
+    if (!query) return drugs.slice(0, 50)
+    return drugs.filter(
+      (d) =>
+        d.name.toLowerCase().includes(query) ||
+        d.generic_name?.toLowerCase().includes(query),
+    )
+  }, [drugs, pickerSearch])
 
   // Visible = not soft-deleted
   const visibleLines = value.filter((rx) => !rx.isDeleted)
@@ -67,6 +151,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     const newLine: PrescriptionLine = {
       localId:      crypto.randomUUID(),
       medicineName: form.medicineName.trim(),
+      drugId:       form.drugId,
       dosage:       form.dosage.trim()       || undefined,
       frequency:    form.frequency           || undefined,
       duration:     form.duration.trim()     || undefined,
@@ -77,6 +162,35 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     onChange([...value, newLine])
     setForm(emptyForm)
     setShowForm(false)
+  }
+
+  // Manual typing always invalidates any prior catalogue selection — drugId
+  // must only ever reflect an explicit pick, never a guess.
+  const handleNameChange = (text: string) => {
+    setForm((f) => ({ ...f, medicineName: text, drugId: undefined }))
+    setShowSuggestions(true)
+  }
+
+  const selectDrug = (drug: PharmacyDrugRow) => {
+    setForm((f) => ({ ...f, medicineName: drugDisplayLabel(drug), drugId: drug.id }))
+    setShowSuggestions(false)
+  }
+
+  const selectFromPicker = (drug: PharmacyDrugRow) => {
+    selectDrug(drug)
+    setPickerOpen(false)
+    setPickerSearch('')
+  }
+
+  const handleNameBlur = () => {
+    // Delay so a click on a suggestion item registers before the list
+    // unmounts (standard combobox blur-race workaround).
+    suggestionsBlurTimeout.current = setTimeout(() => setShowSuggestions(false), 150)
+  }
+
+  const handleNameFocus = () => {
+    if (suggestionsBlurTimeout.current) clearTimeout(suggestionsBlurTimeout.current)
+    if (form.medicineName.trim()) setShowSuggestions(true)
   }
 
   return (
@@ -126,9 +240,14 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                 {rx.instructions && (
                   <p className="text-xs text-muted-foreground">{rx.instructions}</p>
                 )}
-                {rx.carePlanMedicineId && (
-                  <span className="text-xs text-muted-foreground/50">from care plan</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {rx.carePlanMedicineId && (
+                    <span className="text-xs text-muted-foreground/50">from care plan</span>
+                  )}
+                  {rx.drugId && (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400">in catalogue</span>
+                  )}
+                </div>
               </div>
 
               <Button
@@ -165,12 +284,52 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
               <Label htmlFor="pv-med-name">
                 Medicine name <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="pv-med-name"
-                placeholder="e.g. Lisinopril"
-                value={form.medicineName}
-                onChange={(e) => setForm({ ...form, medicineName: e.target.value })}
-              />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    id="pv-med-name"
+                    placeholder="e.g. Lisinopril"
+                    autoComplete="off"
+                    value={form.medicineName}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    onFocus={handleNameFocus}
+                    onBlur={handleNameBlur}
+                  />
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                      {suggestions.map((drug) => (
+                        <button
+                          key={drug.id}
+                          type="button"
+                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
+                          onMouseDown={(e) => e.preventDefault()} // keep input focus so onBlur's timeout doesn't race this click
+                          onClick={() => selectDrug(drug)}
+                        >
+                          <span className="font-medium text-foreground">{drugDisplayLabel(drug)}</span>
+                          <span className="text-xs text-muted-foreground">{drugSubLabel(drug)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => setPickerOpen(true)}
+                  aria-label="Select from inventory"
+                  title="Select from inventory"
+                >
+                  <ListFilter className="h-4 w-4" />
+                </Button>
+              </div>
+              {form.drugId && (
+                <p className="text-xs text-emerald-600 dark:text-emerald-400">Matched to pharmacy catalogue</p>
+              )}
+              {!drugsLoaded && (
+                <p className="text-xs text-muted-foreground">Loading catalogue…</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -236,6 +395,49 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
           </div>
         </div>
       )}
+
+      {/* Select-from-inventory picker */}
+      <Dialog open={pickerOpen} onOpenChange={(open) => { setPickerOpen(open); if (!open) setPickerSearch('') }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select medicine</DialogTitle>
+            <DialogDescription>Browse the clinic&apos;s pharmacy catalogue.</DialogDescription>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              placeholder="Search medicines…"
+              className="pl-9"
+              autoFocus
+            />
+          </div>
+
+          <div className="max-h-80 overflow-y-auto rounded-md border border-border">
+            {!drugsLoaded ? (
+              <p className="p-4 text-center text-sm text-muted-foreground">Loading…</p>
+            ) : pickerResults.length === 0 ? (
+              <p className="p-4 text-center text-sm text-muted-foreground">
+                {drugs.length === 0 ? 'No medicines in the catalogue yet.' : 'No medicines match your search.'}
+              </p>
+            ) : (
+              pickerResults.map((drug) => (
+                <button
+                  key={drug.id}
+                  type="button"
+                  className="flex w-full flex-col items-start gap-0.5 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted focus:bg-muted focus:outline-none"
+                  onClick={() => selectFromPicker(drug)}
+                >
+                  <span className="font-medium text-foreground">{drugDisplayLabel(drug)}</span>
+                  <span className="text-xs text-muted-foreground">{drugSubLabel(drug)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -7,6 +7,16 @@
 //   - severity field added (mild / moderate / severe)
 //   - No hardcoded sample data
 //   - "Custom…" option for observation types the preset list doesn't cover
+//
+// Issue 5 (edit mode): removing a diagnosis/observation that was LOADED
+// from the server (has diagnosisId/observationId) now soft-deletes it —
+// kept in the array with isDeleted: true and hidden from the list — rather
+// than being spliced out entirely. completeVisit's diff logic on the
+// server only sees a line as "delete this" when isDeleted is true AND an
+// id is present; an item silently absent from the array is invisible to
+// that diff and would never actually be removed server-side. A brand-new
+// line (no id yet, never saved) is still just removed from the array
+// outright, since there's nothing on the server to tell to delete.
 
 'use client'
 
@@ -73,7 +83,11 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
 
   const patch = (p: EncounterPatch) => onChange({ ...value, ...p })
 
-  // ── Diagnosis handlers ───────────────────────────────────────────────────
+  // Visible (not soft-deleted) lines, for rendering only.
+  const visibleDiagnoses    = value.diagnoses.filter((d) => !d.isDeleted)
+  const visibleObservations = value.observations.filter((o) => !o.isDeleted)
+
+  // ── Diagnosis handlers ────────────────────────────────────────────────
 
   const handleAddDiagnosis = () => {
     if (!diagForm.conditionName.trim()) return
@@ -83,16 +97,33 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
       severity:      diagForm.severity as DiagnosisSeverity | undefined,
       status:        diagForm.status,
       notes:         diagForm.notes.trim() || undefined,
+      isDeleted:     false,
     }
     patch({ diagnoses: [...value.diagnoses, newDiag] })
     setDiagForm(EMPTY_DIAG_FORM)
     setShowDiagForm(false)
   }
 
-  const handleRemoveDiagnosis = (localId: string) =>
-    patch({ diagnoses: value.diagnoses.filter((d) => d.localId !== localId) })
+  const handleRemoveDiagnosis = (localId: string) => {
+    const target = value.diagnoses.find((d) => d.localId === localId)
+    if (!target) return
 
-  // ── Observation handlers ─────────────────────────────────────────────────
+    if (target.diagnosisId) {
+      // Loaded from the server — soft-delete so the diff on save knows to
+      // remove it. Stays in the array (filtered out of the visible list
+      // above) rather than being spliced out.
+      patch({
+        diagnoses: value.diagnoses.map((d) =>
+          d.localId === localId ? { ...d, isDeleted: true } : d
+        ),
+      })
+    } else {
+      // Never saved — just drop it, nothing for the server to delete.
+      patch({ diagnoses: value.diagnoses.filter((d) => d.localId !== localId) })
+    }
+  }
+
+  // ── Observation handlers ──────────────────────────────────────────────
 
   const handleAddObservation = () => {
     const type =
@@ -106,16 +137,29 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
       observationType: type,
       value:           obsForm.value.trim(),
       unit:            obsForm.unit.trim() || undefined,
+      isDeleted:       false,
     }
     patch({ observations: [...value.observations, newObs] })
     setObsForm(EMPTY_OBS_FORM)
     setShowObsForm(false)
   }
 
-  const handleRemoveObservation = (localId: string) =>
-    patch({ observations: value.observations.filter((o) => o.localId !== localId) })
+  const handleRemoveObservation = (localId: string) => {
+    const target = value.observations.find((o) => o.localId === localId)
+    if (!target) return
 
-  // ── Render ───────────────────────────────────────────────────────────────
+    if (target.observationId) {
+      patch({
+        observations: value.observations.map((o) =>
+          o.localId === localId ? { ...o, isDeleted: true } : o
+        ),
+      })
+    } else {
+      patch({ observations: value.observations.filter((o) => o.localId !== localId) })
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-6">
@@ -148,13 +192,13 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
         />
       </div>
 
-      {/* ── Diagnoses ─────────────────────────────────────────────────────── */}
+      {/* ── Diagnoses ─────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3">
         <Label>Diagnoses</Label>
 
-        {value.diagnoses.length > 0 && (
+        {visibleDiagnoses.length > 0 && (
           <div className="flex flex-col gap-2">
-            {value.diagnoses.map((d) => (
+            {visibleDiagnoses.map((d) => (
               <div
                 key={d.localId}
                 className="flex items-center gap-3 rounded-lg border border-border px-3 py-2"
@@ -266,13 +310,13 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
         )}
       </div>
 
-      {/* ── Observations / Vitals ──────────────────────────────────────────── */}
+      {/* ── Observations / Vitals ────────────────────────────────────── */}
       <div className="flex flex-col gap-3">
         <Label>Vitals &amp; observations</Label>
 
-        {value.observations.length > 0 && (
+        {visibleObservations.length > 0 && (
           <div className="flex flex-col gap-2">
-            {value.observations.map((obs) => (
+            {visibleObservations.map((obs) => (
               <div
                 key={obs.localId}
                 className="flex items-center gap-3 rounded-lg border border-border px-3 py-2"

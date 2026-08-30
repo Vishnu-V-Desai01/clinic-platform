@@ -5,10 +5,16 @@
 // Derives summaries from actual data; shows "Skipped" badge when a step
 // is in skippedSteps[].
 // onEditStep jumps the wizard back to the named step for corrections.
+//
+// Issue 5 additions: chargesLocked / chargesRequireApproval reflect the
+// financial-integrity state in the charges section — a locked charge shows
+// a "Locked" badge instead of an Edit button (nothing to edit), and a
+// staff-proposed charge shows a "Needs approval" badge alongside its
+// summary rather than looking identical to an auto-approved one.
 
 'use client'
 
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Lock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { WIZARD_STEP_LABELS } from '../types'
@@ -21,25 +27,20 @@ import type {
 } from '../types'
 
 interface ReviewCardProps {
-  prescriptions: PrescriptionLine[]
-  reminderTimes: MedicineReminderTime[]
-  encounter:     EncounterData
-  charges:       ChargeLineItem[]
-  skippedSteps:  WizardStep[]
-  onEditStep:    (step: WizardStep) => void
+  prescriptions:           PrescriptionLine[]
+  reminderTimes:           MedicineReminderTime[]
+  encounter:               EncounterData
+  charges:                 ChargeLineItem[]
+  skippedSteps:            WizardStep[]
+  onEditStep:              (step: WizardStep) => void
+  chargesLocked?:          boolean
+  chargesRequireApproval?: boolean
 }
 
-// ── Summary helpers ────────────────────────────────────────────────────────────
+// ── Summary helpers ──────────────────────────────────────────────────────
 
 const fmt = (rupees: number) =>
   `₹${rupees.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-function fmtTime(hhmm: string): string {
-  const [h, m] = hhmm.split(':').map(Number)
-  const period  = h >= 12 ? 'PM' : 'AM'
-  const hour12  = h % 12 || 12
-  return `${hour12}:${String(m).padStart(2, '0')} ${period}`
-}
 
 function rxSummary(lines: PrescriptionLine[]): string {
   const active = lines.filter((rx) => !rx.isDeleted)
@@ -59,10 +60,12 @@ function reminderSummary(times: MedicineReminderTime[]): string {
 }
 
 function encSummary(enc: EncounterData): string {
+  const activeDiagnoses    = enc.diagnoses.filter((d) => !d.isDeleted)
+  const activeObservations = enc.observations.filter((o) => !o.isDeleted)
   const parts: string[] = []
-  if (enc.chiefComplaint)      parts.push(enc.chiefComplaint)
-  if (enc.diagnoses.length)    parts.push(`${enc.diagnoses.length} diagnosis${enc.diagnoses.length > 1 ? 'es' : ''}`)
-  if (enc.observations.length) parts.push(`${enc.observations.length} vital${enc.observations.length > 1 ? 's' : ''}`)
+  if (enc.chiefComplaint)          parts.push(enc.chiefComplaint)
+  if (activeDiagnoses.length)      parts.push(`${activeDiagnoses.length} diagnosis${activeDiagnoses.length > 1 ? 'es' : ''}`)
+  if (activeObservations.length)   parts.push(`${activeObservations.length} vital${activeObservations.length > 1 ? 's' : ''}`)
   return parts.length > 0 ? parts.join(' · ') : 'No clinical notes'
 }
 
@@ -72,7 +75,7 @@ function chargeSummary(items: ChargeLineItem[]): string {
   return `${items.length} item${items.length > 1 ? 's' : ''} · ${fmt(total)}`
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────
 
 type SectionDef = {
   step:    WizardStep
@@ -86,6 +89,8 @@ export default function ReviewCard({
   charges,
   skippedSteps,
   onEditStep,
+  chargesLocked,
+  chargesRequireApproval,
 }: ReviewCardProps) {
   const sections: SectionDef[] = [
     { step: 'prescriptions', summary: rxSummary(prescriptions) },
@@ -105,7 +110,9 @@ export default function ReviewCard({
 
       <div className="flex flex-col gap-3">
         {sections.map(({ step, summary }) => {
-          const isSkipped = skippedSteps.includes(step)
+          const isSkipped     = skippedSteps.includes(step)
+          const isChargesStep = step === 'charges'
+
           return (
             <div
               key={step}
@@ -119,6 +126,14 @@ export default function ReviewCard({
                   <h3 className="text-sm font-medium text-foreground">
                     {WIZARD_STEP_LABELS[step]}
                   </h3>
+                  {isChargesStep && chargesRequireApproval && !chargesLocked && (
+                    <Badge
+                      variant="secondary"
+                      className="bg-primary/10 text-xs text-primary"
+                    >
+                      Needs approval
+                    </Badge>
+                  )}
                 </div>
                 {isSkipped ? (
                   <Badge
@@ -132,14 +147,21 @@ export default function ReviewCard({
                 )}
               </div>
 
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0 text-primary hover:bg-primary/10 hover:text-primary"
-                onClick={() => onEditStep(step)}
-              >
-                Edit
-              </Button>
+              {isChargesStep && chargesLocked ? (
+                <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <Lock className="h-3.5 w-3.5" />
+                  Locked
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 text-primary hover:bg-primary/10 hover:text-primary"
+                  onClick={() => onEditStep(step)}
+                >
+                  Edit
+                </Button>
+              )}
             </div>
           )
         })}
@@ -151,7 +173,10 @@ export default function ReviewCard({
           Clicking{' '}
           <strong className="text-foreground">Complete Visit</strong> saves all
           entries and marks the appointment complete. Skipped steps create no
-          records. This cannot be undone.
+          records.
+          {chargesRequireApproval && !chargesLocked && (
+            <> Charges will be held for approval before they&apos;re finalized.</>
+          )}
         </p>
       </div>
     </div>

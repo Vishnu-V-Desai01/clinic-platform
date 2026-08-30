@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MedicinesSection } from './medicines-section';
-import { FollowUpsSection } from './follow-ups-section';
 import { SuggestionsSection } from './suggestions-section';
 import { RemindersSection } from './reminders-section';
 
@@ -82,7 +81,7 @@ export function CarePlanView({ patientId }: CarePlanViewProps) {
       <Card>
         <CardHeader>
           <CardTitle>No Care Plan Found</CardTitle>
-          <CardDescription>Create a care plan to start managing medicines, follow-ups, and reminders.</CardDescription>
+          <CardDescription>Create a care plan to start managing medicines and reminders.</CardDescription>
         </CardHeader>
         <CardContent>
           <Button
@@ -118,19 +117,14 @@ export function CarePlanView({ patientId }: CarePlanViewProps) {
 
       {/* Care Plan Tabs */}
       <Tabs defaultValue="medicines" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="medicines">Medicines</TabsTrigger>
-          <TabsTrigger value="follow-ups">Follow-ups</TabsTrigger>
           <TabsTrigger value="suggestions">Suggestions</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
         </TabsList>
 
         <TabsContent value="medicines" className="space-y-4">
           <MedicinesSection carePlanId={carePlan.id} medicines={carePlan.medicines} />
-        </TabsContent>
-
-        <TabsContent value="follow-ups" className="space-y-4">
-          <FollowUpsSection carePlanId={carePlan.id} followUps={carePlan.follow_ups} />
         </TabsContent>
 
         <TabsContent value="suggestions" className="space-y-4">
