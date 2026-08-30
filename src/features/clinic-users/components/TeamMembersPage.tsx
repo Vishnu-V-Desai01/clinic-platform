@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Switch } from '@/components/ui/switch';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +35,8 @@ interface TeamMember {
   staffType?: 'receptionist' | 'nurse' | 'assistant' | 'pharmacist' | null;
   status: 'active' | 'suspended' | 'removed';
   lastActive: string | null;
+  isClinicAdmin: boolean;
+  pharmacyAccess: boolean;
 }
 
 interface InviteValues {
@@ -49,6 +52,7 @@ interface TeamMembersPageProps {
   onSuspend?: (id: string) => void;
   onReactivate?: (id: string) => void;
   onRemove?: (id: string) => void;
+  onTogglePharmacyAccess?: (id: string, granted: boolean) => void;
   onSwitchToDoctor?: () => void;
 }
 
@@ -223,6 +227,37 @@ function RowActionsMenu({
   );
 }
 
+// Admin access is implicit and unconditional (see am_i_pharmacy_user() —
+// is_clinic_admin OR pharmacy_access). A toggle on an admin row would either
+// be a confusing no-op or make it look like unchecking revokes their access,
+// which it structurally cannot. Shown as a static badge instead.
+function PharmacyAccessCell({
+  member,
+  isLoading,
+  onToggle,
+}: {
+  member: TeamMember;
+  isLoading?: boolean;
+  onToggle?: (id: string, granted: boolean) => void;
+}) {
+  if (member.isClinicAdmin) {
+    return <Badge variant="secondary">Included (Admin)</Badge>;
+  }
+
+  if (member.status === 'removed') {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  return (
+    <Switch
+      checked={member.pharmacyAccess}
+      onCheckedChange={(checked) => onToggle?.(member.id, checked)}
+      disabled={isLoading}
+      aria-label={`Pharmacy access for ${member.name}`}
+    />
+  );
+}
+
 export default function TeamMembersPage({
   members = [],
   isLoading = false,
@@ -230,6 +265,7 @@ export default function TeamMembersPage({
   onSuspend,
   onReactivate,
   onRemove,
+  onTogglePharmacyAccess,
   onSwitchToDoctor,
 }: TeamMembersPageProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -274,6 +310,7 @@ export default function TeamMembersPage({
                   <TableHead>Role</TableHead>
                   <TableHead>Staff Type</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Pharmacy Access</TableHead>
                   <TableHead>Last Active</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -297,6 +334,9 @@ export default function TeamMembersPage({
                     </TableCell>
                     <TableCell>
                       <Badge className={getStatusBadgeColor(member.status)}>{member.status}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <PharmacyAccessCell member={member} isLoading={isLoading} onToggle={onTogglePharmacyAccess} />
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatRelativeTime(member.lastActive)}</TableCell>
                     <TableCell className="text-right">

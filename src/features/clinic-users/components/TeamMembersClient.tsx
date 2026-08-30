@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react'
 import TeamMembersPage from './TeamMembersPage'
 import { createInvitation } from '@/features/invitations/actions'
 import { suspendUser, reactivateUser, removeUser } from '@/features/clinic-users/actions'
+import { setPharmacyAccess } from '@/features/pharmacy/actions'
 import type { ClinicUser } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,8 @@ type TeamMember = {
   staffType?: 'receptionist' | 'nurse' | 'assistant' | 'pharmacist' | null
   status: 'active' | 'suspended' | 'removed'
   lastActive: string | null
+  isClinicAdmin: boolean
+  pharmacyAccess: boolean
 }
 
 export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
@@ -33,6 +36,8 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
     staffType: u.staff_type,
     status: u.status,
     lastActive: null,
+    isClinicAdmin: u.is_clinic_admin,
+    pharmacyAccess: u.pharmacy_access,
   }))
 
   function handleInvite(values: { email: string; role: 'doctor' | 'staff'; staffType?: string | null }) {
@@ -85,6 +90,14 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
     })
   }
 
+  function handleTogglePharmacyAccess(id: string, granted: boolean) {
+    startTransition(async () => {
+      const result = await setPharmacyAccess({ profile_id: id, pharmacy_access: granted })
+      if (!result.ok) window.alert(result.error)
+      router.refresh()
+    })
+  }
+
   return (
     <>
       <TeamMembersPage
@@ -94,6 +107,7 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
         onSuspend={handleSuspend}
         onReactivate={handleReactivate}
         onRemove={handleRemove}
+        onTogglePharmacyAccess={handleTogglePharmacyAccess}
         onSwitchToDoctor={() => router.push('/dashboard/patients')}
       />
 

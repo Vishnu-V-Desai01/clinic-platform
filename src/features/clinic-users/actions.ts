@@ -21,7 +21,7 @@ export async function listClinicUsers(): Promise<ActionResult<ClinicUser[]>> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, clerk_user_id, email, full_name, role, clinic_id, is_clinic_admin, staff_type, status, created_at')
+    .select('id, clerk_user_id, email, full_name, role, clinic_id, is_clinic_admin, staff_type, status, pharmacy_access, created_at')
     .in('role', ['doctor', 'staff'])
     .order('created_at', { ascending: true })
 
