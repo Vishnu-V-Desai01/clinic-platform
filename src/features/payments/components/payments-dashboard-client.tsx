@@ -286,10 +286,10 @@ export default function PaymentsDashboardClient({
             }}
           >
             <SelectTrigger className="w-full md:w-48">
-              <SelectValue placeholder="Status" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="All">All</SelectItem>
+              <SelectItem value="All">All statuses</SelectItem>
               <SelectItem value="Pending Approval">Pending Approval</SelectItem>
               <SelectItem value="Unpaid">Unpaid</SelectItem>
               <SelectItem value="Partially Paid">Partially Paid</SelectItem>
@@ -306,10 +306,10 @@ export default function PaymentsDashboardClient({
             }}
           >
             <SelectTrigger className="w-full md:w-48">
-              <SelectValue placeholder="Mode" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="All">All</SelectItem>
+              <SelectItem value="All">All modes</SelectItem>
               <SelectItem value="Cash">Cash</SelectItem>
               <SelectItem value="Card">Card</SelectItem>
               <SelectItem value="UPI">UPI</SelectItem>

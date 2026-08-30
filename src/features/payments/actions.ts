@@ -828,18 +828,11 @@ export async function createManualChargeAndApprove(
       return { success: false, error: 'Failed to save line items: ' + lineItemError.message };
     }
 
-    try {
-      await generateAndStorePaymentDocuments(newPayment.id);
-    } catch (docError) {
-      console.error('[createManualChargeAndApprove] Doc generation failed:', docError);
-    }
-
-    // Queue WhatsApp receipt message — non-blocking
-    try {
-      await createReceiptMessage({ paymentId: newPayment.id });
-    } catch (err) {
-      console.error('[createManualChargeAndApprove] Receipt message failed:', err);
-    }
+    // Receipt generation + WhatsApp message moved to recordPaymentCollection
+    // (fires on first payment collected, not on approval) — see comment
+    // there. Approval alone no longer produces a receipt; a premature
+    // receipt for an unpaid bill is not useful and the bill is still
+    // freely editable at this point (Issue 5).
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
@@ -919,18 +912,9 @@ export async function setAmountAndApprovePayment(
       return { success: false, error: 'Failed to approve charge' };
     }
 
-    try {
-      await generateAndStorePaymentDocuments(v.payment_id);
-    } catch (docError) {
-      console.error('[setAmountAndApprovePayment] Doc generation failed:', docError);
-    }
-
-    // Queue WhatsApp receipt message — non-blocking
-    try {
-      await createReceiptMessage({ paymentId: v.payment_id });
-    } catch (err) {
-      console.error('[setAmountAndApprovePayment] Receipt message failed:', err);
-    }
+    // Receipt generation + WhatsApp message moved to recordPaymentCollection
+    // (fires on first payment collected, not on approval) — see comment
+    // there.
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
@@ -999,20 +983,9 @@ export async function approvePayment(
       return { success: false, error: 'Failed to update payment' };
     }
 
-    if (v.approval_status === 'approved') {
-      try {
-        await generateAndStorePaymentDocuments(v.payment_id);
-      } catch (docError) {
-        console.error('[approvePayment] Doc generation failed:', docError);
-      }
-
-      // Queue WhatsApp receipt message — non-blocking
-      try {
-        await createReceiptMessage({ paymentId: v.payment_id });
-      } catch (err) {
-        console.error('[approvePayment] Receipt message failed:', err);
-      }
-    }
+    // Receipt generation + WhatsApp message moved to recordPaymentCollection
+    // (fires on first payment collected, not on approval) — see comment
+    // there.
 
     revalidatePath('/dashboard/payments');
     revalidatePath('/dashboard/payments/approvals');
@@ -1044,8 +1017,21 @@ export async function updatePaymentAmount(
 
     if (fetchError || !payment) return { success: false, error: 'Payment not found' };
 
-    if (payment.approval_status !== 'pending') {
-      return { success: false, error: 'Cannot update amount for non-pending payments' };
+    // Editable when pending (not yet approved) OR approved-but-unpaid
+    // (approved but payment_status still 'unpaid' — no payment_collections
+    // row exists yet). Locked the moment ANY money has been collected
+    // (payment_status 'partial' or 'paid'), matching the immutability rule
+    // confirmed for Issue 5: a receipt only exists once money has actually
+    // changed hands, and that's the same moment the charge becomes locked.
+    const isEditable =
+      payment.approval_status === 'pending' ||
+      (payment.approval_status === 'approved' && payment.payment_status === 'unpaid');
+
+    if (!isEditable) {
+      return {
+        success: false,
+        error: 'Cannot update amount once payment has been collected on this charge',
+      };
     }
 
     const { error: updateError } = await supabase
@@ -1106,6 +1092,15 @@ export async function recordPaymentCollection(
     const doctorResult = resolveDoctorId(profile, v.doctor_id);
     if ('error' in doctorResult) return { success: false, error: doctorResult.error };
 
+    // Captured BEFORE the insert below — payment.amount_paid reflects the
+    // state prior to this collection. Used to detect "is this the FIRST
+    // money ever collected on this payment" (Issue 5 design decision):
+    // receipt generation and the WhatsApp receipt message now fire on
+    // first collection, not on approval — a premature receipt for a bill
+    // nobody has paid yet isn't useful, and the bill stays freely editable
+    // until money actually changes hands.
+    const isFirstCollection = (payment.amount_paid || 0) === 0;
+
     const { data, error } = await supabase
       .from('payment_collections')
       .insert({
@@ -1125,6 +1120,21 @@ export async function recordPaymentCollection(
     if (error) {
       console.error('[recordPaymentCollection]', error);
       return { success: false, error: 'Failed to record collection' };
+    }
+
+    if (isFirstCollection) {
+      try {
+        await generateAndStorePaymentDocuments(v.payment_id);
+      } catch (docError) {
+        console.error('[recordPaymentCollection] Doc generation failed:', docError);
+      }
+
+      // Queue WhatsApp receipt message — non-blocking
+      try {
+        await createReceiptMessage({ paymentId: v.payment_id });
+      } catch (err) {
+        console.error('[recordPaymentCollection] Receipt message failed:', err);
+      }
     }
 
     revalidatePath('/dashboard/payments');

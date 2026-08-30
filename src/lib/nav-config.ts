@@ -9,16 +9,15 @@ import {
   ClipboardCheck,
   Settings,
   BarChart3,
+  Pill,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/profile'
-
 export type NavItem = {
   title: string
   href: string
   icon: LucideIcon
   badgeCount?: number
 }
-
 export const navByRole: Record<Role, NavItem[]> = {
   doctor: [
     { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -44,10 +43,21 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   ],
 }
-
 // Shown when a doctor+admin user is inside /dashboard/admin/* or /dashboard/settings
 export const adminModeNav: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard/admin', icon: LayoutDashboard },
   { title: 'Team Members', href: '/dashboard/admin/users', icon: Users },
   { title: 'Settings', href: '/dashboard/settings', icon: Settings },
 ]
+
+// Not part of navByRole: visibility depends on staff_type (not just role)
+// AND clinics.pharmacy_enabled, neither of which navByRole's static
+// Record<Role, NavItem[]> shape can express. AppSidebar injects this
+// conditionally — see canSeePharmacy there. Mirrors assertPharmacyReader()
+// in src/features/pharmacy/actions.ts: doctor OR staff_type='pharmacist' OR
+// is_clinic_admin, AND the clinic has the module enabled.
+export const pharmacyNavItem: NavItem = {
+  title: 'Pharmacy',
+  href: '/dashboard/pharmacy',
+  icon: Pill,
+}

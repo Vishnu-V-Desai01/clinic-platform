@@ -4,11 +4,11 @@ export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ArrowLeft, FileText, Download } from 'lucide-react';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileText, Download } from 'lucide-react';
 import EditBillDialog from '@/features/payments/components/edit-bill-dialog-client';
 import type { PaymentLineItem } from '@/features/payments/types';
 
@@ -99,6 +99,15 @@ export default async function PaymentDetailPage({
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="max-w-3xl mx-auto space-y-6">
+
+        {/* Back to Payments */}
+        <Link
+          href="/dashboard/payments"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Payments
+        </Link>
 
         {/* Page heading */}
         <div>

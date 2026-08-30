@@ -3,7 +3,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { MailPlus, Inbox, UserPlus, X } from 'lucide-react';
+import { MailPlus, Inbox, UserPlus, X, Percent } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -35,11 +35,28 @@ interface PendingInvitation {
   sentAt: string;
 }
 
+// Objective 9 — a medicine bill that was discounted below its computed
+// subtotal. dispensedByName is whoever performed the dispense/discount
+// (payments.approved_by); doctorName is the prescribing doctor
+// (payments.doctor_id) — kept distinct since they're commonly different
+// people (a pharmacist dispensing a doctor's prescription).
+interface DiscountedMedicineBill {
+  id: string;
+  patientName: string;
+  doctorName: string;
+  dispensedByName: string;
+  originalAmountPaise: number;
+  finalAmountPaise: number;
+  discountAmountPaise: number;
+  createdAt: string;
+}
+
 interface AdminDashboardProps {
   kpis?: Kpis;
   activitySeries?: ActivityPoint[];
   pendingInvitations?: PendingInvitation[];
   hasTeamMembers?: boolean;
+  discountedMedicineBills?: DiscountedMedicineBill[];
   onInviteUser?: () => void;
   onRevoke?: (invitationId: string) => void;
   onSwitchToDoctor?: () => void;
@@ -60,6 +77,17 @@ function formatChartDate(isoDate: string): string {
 function formatInvitationDate(isoDate: string): string {
   const date = new Date(isoDate);
   return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+}
+
+function formatShortDateTime(isoDate: string): string {
+  const date = new Date(isoDate);
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
+  }).format(date);
 }
 
 // Only called when no real data is passed — e.g. isolated component
@@ -204,11 +232,55 @@ function PendingInvitationsSection({
   );
 }
 
+// Objective 9 — mirrors PendingInvitationsSection's structure (bordered
+// card, header + list/empty-state), so it fits the existing visual language
+// rather than introducing a new pattern. Only rendered at all when there's
+// at least one discounted bill — an empty card here would be noise, unlike
+// the invitations card which has a deliberate "invite your first" CTA.
+function DiscountedMedicineBillsSection({ bills }: { bills: DiscountedMedicineBill[] }) {
+  if (bills.length === 0) return null;
+
+  return (
+    <div className="border border-border bg-card rounded-xl shadow-sm p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Percent className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+        <h2 className="text-lg font-semibold text-foreground">Discounted Medicine Bills</h2>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        Recent medicine bills where the charged amount was reduced from the computed price.
+      </p>
+      <div className="space-y-3">
+        {bills.map((bill) => (
+          <div key={bill.id} className="border border-border rounded-lg p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{bill.patientName}</p>
+                <p className="text-xs text-muted-foreground">
+                  Prescribed by {bill.doctorName} · Dispensed by {bill.dispensedByName}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">{formatShortDateTime(bill.createdAt)}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm text-muted-foreground line-through">{formatINR(bill.originalAmountPaise)}</p>
+                <p className="text-sm font-semibold text-foreground">{formatINR(bill.finalAmountPaise)}</p>
+                <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 mt-1">
+                  -{formatINR(bill.discountAmountPaise)}
+                </Badge>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard({
   kpis,
   activitySeries,
   pendingInvitations,
   hasTeamMembers = true,
+  discountedMedicineBills = [],
   onInviteUser,
   onRevoke,
   onSwitchToDoctor,
@@ -259,6 +331,8 @@ export default function AdminDashboard({
           />
         </div>
       </div>
+
+      <DiscountedMedicineBillsSection bills={discountedMedicineBills} />
     </div>
   );
 }

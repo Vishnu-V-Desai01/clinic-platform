@@ -8,6 +8,7 @@ import {
   Loader2,
   Mail,
   Phone,
+  Pill,
   Printer,
   Stethoscope,
 } from 'lucide-react'
@@ -42,6 +43,19 @@ import type { ConfirmAppointmentRequestInput } from '../schema'
 // requestId, which the caller already knows from context.
 export type ConfirmValues = Omit<ConfirmAppointmentRequestInput, 'requestId'>
 
+// Chat C, objective 6 — one row of the "Recent Medicine Sales" panel.
+// doctor_name is the PRESCRIBING doctor (payments.doctor_id, set by
+// dispenseAndBillEncounter), not whoever physically dispensed the medicine.
+export interface RecentMedicineSaleRow {
+  id: string
+  patient_name: string
+  doctor_name: string
+  drug_summary: string
+  amount_charged_paise: number
+  discounted: boolean
+  created_at: string
+}
+
 export interface StaffDashboardViewProps {
   pendingRequests?: PendingRequestItem[]
   doctors?: DoctorOption[]
@@ -49,6 +63,7 @@ export interface StaffDashboardViewProps {
   missingEmailPatients?: NoPortalPatientItem[]
   outstandingPayments?: OutstandingPaymentItem[]
   remindersDueToday?: number
+  recentMedicineSales?: RecentMedicineSaleRow[]
   isLoading?: boolean
   onConfirm?: (requestId: string, values: ConfirmValues) => Promise<void> | void
   onReject?: (requestId: string, reason: string) => Promise<void> | void
@@ -90,6 +105,9 @@ const samplePayments: OutstandingPaymentItem[] = [
   { id: 'pay-1', patientId: 'p-14', patientName: 'Arjun Singh', amountCharged: 2500, amountPaid: 0, outstandingBalance: 2500, paymentStatus: 'pending', isOverdue: true, createdAt: '2026-08-01T00:00:00Z' },
   { id: 'pay-2', patientId: 'p-15', patientName: 'Neha Gupta', amountCharged: 1800, amountPaid: 0, outstandingBalance: 1800, paymentStatus: 'pending', isOverdue: false, createdAt: '2026-08-05T00:00:00Z' },
   { id: 'pay-3', patientId: 'p-16', patientName: 'Rajesh Sharma', amountCharged: 3200, amountPaid: 0, outstandingBalance: 3200, paymentStatus: 'pending', isOverdue: true, createdAt: '2026-08-02T00:00:00Z' },
+]
+const sampleMedicineSales: RecentMedicineSaleRow[] = [
+  { id: 'ms-1', patient_name: 'Riteek Patil', doctor_name: 'Dr. Vishnu V Desai', drug_summary: 'Dolo 650', amount_charged_paise: 3000, discounted: false, created_at: '2026-08-26T09:42:00Z' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -170,6 +188,7 @@ export default function StaffDashboardView({
   missingEmailPatients = sampleMissingEmail,
   outstandingPayments = samplePayments,
   remindersDueToday = 18,
+  recentMedicineSales = sampleMedicineSales,
   isLoading = false,
   onConfirm,
   onReject,
@@ -378,6 +397,55 @@ export default function StaffDashboardView({
                             <span className="block truncate text-sm text-muted-foreground">
                               {appointment.chiefComplaint ?? '—'}
                             </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="gap-1 px-4 py-4">
+              <div className="flex items-center gap-2">
+                <Pill className="size-4 text-primary" aria-hidden="true" />
+                <CardTitle className="text-base">Recent Medicine Sales</CardTitle>
+              </div>
+              <CardDescription>Pharmacy dispensing, attributed to the prescribing doctor</CardDescription>
+            </CardHeader>
+            <CardContent className="px-2 pb-2 sm:px-4">
+              {isLoading ? (
+                <LoadingRows count={3} />
+              ) : recentMedicineSales.length === 0 ? (
+                <EmptyState icon={Pill}>No medicine sales yet</EmptyState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Patient</TableHead>
+                        <TableHead>Doctor</TableHead>
+                        <TableHead className="hidden md:table-cell">Medicines</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recentMedicineSales.map((sale) => (
+                        <TableRow key={sale.id}>
+                          <TableCell className="min-w-32 font-medium">{sale.patient_name}</TableCell>
+                          <TableCell className="min-w-32 text-sm text-muted-foreground">{sale.doctor_name}</TableCell>
+                          <TableCell className="hidden max-w-56 md:table-cell">
+                            <span className="block truncate text-sm text-muted-foreground">{sale.drug_summary}</span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="font-semibold">{formatINR(sale.amount_charged_paise / 100)}</span>
+                              {sale.discounted && (
+                                <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400">Discounted</Badge>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}

@@ -270,6 +270,32 @@ export async function getRemindersDueTodayCount(): Promise<RemindersDueSummary> 
 }
 
 // ---------------------------------------------------------------------------
+// Panel 6 (Chat C, objective 6): recent medicine sales, doctor-attributed.
+//
+// Thin pass-through to the pharmacy feature's action — kept here so this
+// dashboard's data-fetching stays centralized in one file, same as every
+// other panel above. Lazily imported (not a top-level import) to avoid
+// pulling the entire pharmacy feature into this module's dependency graph
+// for consumers that never call this function.
+//
+// Doctor attribution is whatever payments.doctor_id holds — set to the
+// PRESCRIBING doctor by dispenseAndBillEncounter, not the dispensing user.
+// Fails soft (returns []) rather than throwing: a clinic with the pharmacy
+// module disabled, or with pharmacy_access not yet granted to anyone, should
+// not break the rest of this shared dashboard.
+// ---------------------------------------------------------------------------
+
+export async function listRecentMedicineSales() {
+  await requireRole("staff", "doctor");
+  const { getRecentMedicineSales } = await import("@/features/pharmacy/actions");
+  const result = await getRecentMedicineSales(10);
+  if (!result.ok) {
+    return [];
+  }
+  return result.data;
+}
+
+// ---------------------------------------------------------------------------
 // Confirm a pending request: create the real appointment, then close out
 // the request. Staff and doctors both do this directly — no cross-approval.
 // ---------------------------------------------------------------------------

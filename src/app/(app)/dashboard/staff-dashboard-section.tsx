@@ -6,6 +6,7 @@ import {
   listOutstandingPayments,
   getRemindersDueTodayCount,
   listClinicDoctors,
+  listRecentMedicineSales,
   confirmAppointmentRequest,
   rejectAppointmentRequest,
   updatePatientEmail,
@@ -14,15 +15,23 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function StaffDashboardSection() {
-  const [pendingRequests, todaysAppointments, missingEmailPatients, outstandingPayments, reminders, doctors] =
-    await Promise.all([
-      listPendingAppointmentRequests(),
-      listTodaysAppointments(),
-      listPatientsWithoutPortalAccess(),
-      listOutstandingPayments(),
-      getRemindersDueTodayCount(),
-      listClinicDoctors(),
-    ]);
+  const [
+    pendingRequests,
+    todaysAppointments,
+    missingEmailPatients,
+    outstandingPayments,
+    reminders,
+    doctors,
+    recentMedicineSales,
+  ] = await Promise.all([
+    listPendingAppointmentRequests(),
+    listTodaysAppointments(),
+    listPatientsWithoutPortalAccess(),
+    listOutstandingPayments(),
+    getRemindersDueTodayCount(),
+    listClinicDoctors(),
+    listRecentMedicineSales(),
+  ]);
 
   return (
     <StaffDashboardView
@@ -32,6 +41,7 @@ export default async function StaffDashboardSection() {
       missingEmailPatients={missingEmailPatients}
       outstandingPayments={outstandingPayments}
       remindersDueToday={reminders.count}
+      recentMedicineSales={recentMedicineSales}
       onConfirm={async (requestId, values) => {
         "use server";
         await confirmAppointmentRequest({ requestId, ...values });

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useTransition } from 'react'
 import AdminDashboard from './AdminDashboard'
 import { revokeInvitation } from '@/features/invitations/actions'
-import type { AdminDashboardKpis, ActivityPoint } from '../types'
+import type { AdminDashboardKpis, ActivityPoint, DiscountedMedicineBill } from '../types'
 
 type PendingInvitationView = {
   id: string
@@ -19,9 +19,16 @@ type Props = {
   activitySeries?: ActivityPoint[]
   pendingInvitations: PendingInvitationView[]
   hasTeamMembers: boolean
+  discountedMedicineBills?: DiscountedMedicineBill[]
 }
 
-export function AdminDashboardClient({ kpis, activitySeries, pendingInvitations, hasTeamMembers }: Props) {
+export function AdminDashboardClient({
+  kpis,
+  activitySeries,
+  pendingInvitations,
+  hasTeamMembers,
+  discountedMedicineBills,
+}: Props) {
   const router = useRouter()
   const [, startTransition] = useTransition()
 
@@ -46,6 +53,7 @@ export function AdminDashboardClient({ kpis, activitySeries, pendingInvitations,
       activitySeries={activitySeries}
       pendingInvitations={pendingInvitations}
       hasTeamMembers={hasTeamMembers}
+      discountedMedicineBills={discountedMedicineBills}
       onInviteUser={handleInviteUser}
       onRevoke={handleRevoke}
       onSwitchToDoctor={handleSwitchToDoctor}
