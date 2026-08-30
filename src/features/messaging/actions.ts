@@ -227,7 +227,17 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
       clinic_id: patient.clinic_id,
       patient_id: patient.id,
       type: "registration",
-      language: patient.language_preference,
+      // Item 5: registration has five seeded language templates, but only
+      // the English one (curakin_registration_en) is approved by Meta —
+      // the other four have never gone live. Sending in any other language
+      // fails at the provider, so this is forced to "en" regardless of the
+      // patient's language_preference. Revert to
+      // `language: patient.language_preference` once the remaining four
+      // languages are approved. (Audited alongside this: appointment,
+      // receipt, and medicine_receipt all have all 5 languages approved,
+      // so those send paths correctly keep using language_preference and
+      // are NOT forced to English.)
+      language: "en",
       phone: phoneWithCountryCode,
       placeholders,
       status: "pending",
