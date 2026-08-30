@@ -29,6 +29,7 @@ export const createTestProfile = (overrides?: Partial<Profile>): Profile => ({
   has_admin_onboarded: false,
   staff_type: null,
   status: 'active',
+  pharmacy_access: false,
   ...overrides,
 })
 
