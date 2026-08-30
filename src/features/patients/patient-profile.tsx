@@ -221,7 +221,6 @@ export default function PatientProfile({
     <TabsTrigger value="medical-history" className="shrink-0">Medical History</TabsTrigger>
     <TabsTrigger value="care-profile" className="shrink-0">Care Profile</TabsTrigger>
     <TabsTrigger value="appointments" className="shrink-0">Appointments</TabsTrigger>
-    <TabsTrigger value="payments" className="shrink-0">Payments</TabsTrigger>
   </TabsList>
 
         {/* Overview tab */}
@@ -415,12 +414,6 @@ export default function PatientProfile({
               ))}
             </div>
           )}
-        </TabsContent>
-
-        {/* Payments tab — not yet built */}
-        <TabsContent value="payments" className="mt-6">
-          <EmptyState title="Payments coming soon"
-            note="Invoices, balances, and payment history will appear here." />
         </TabsContent>
       </Tabs>
 

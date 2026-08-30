@@ -3,6 +3,7 @@ import {
   getOrCreateProfile,
   claimFamilyAccountAndCreatePatientProfile,
 } from '@/lib/supabase/profile'
+import PhoneClaimForm from './phone-claim-form'
 
 // Dedicated entry point for patients arriving via the WhatsApp
 // "view your dashboard" link. Kept separate from "/" on purpose —
@@ -25,16 +26,13 @@ export default async function PatientPortalPage() {
     redirect('/portal')
   }
 
+  // Email-based claim found nothing (either the patient has no email on
+  // file, or their email doesn't match any patient row). Item 3a: rather
+  // than a dead end, offer a phone-based claim as a fallback — this is
+  // exactly the case a patient without an email hits.
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
-      <div className="max-w-md space-y-2 text-center">
-        <h1 className="text-2xl font-semibold">No patient record found</h1>
-        <p className="text-sm text-muted-foreground">
-          We couldn&apos;t find a patient record matching your account&apos;s
-          email address. Please check with your clinic to confirm the email
-          they registered you with.
-        </p>
-      </div>
+      <PhoneClaimForm />
     </div>
   )
 }

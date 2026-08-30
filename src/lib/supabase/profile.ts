@@ -136,6 +136,90 @@ export async function claimFamilyAccountAndCreatePatientProfile(): Promise<Profi
   return newProfile as Profile
 }
 
+// Item 3a: phone-based counterpart to claimFamilyAccountAndCreatePatientProfile,
+// for patients registered without an email on file. Unlike the email-based
+// claim (which fails silently by returning null so the caller can show a
+// generic "no record" message), this returns a discriminated result — a
+// phone-entry FORM needs to show a specific validation/error message back
+// to the person typing, not just fall through to a dead end.
+//
+// rawPhone is normalized (digits only) before matching, matching the same
+// pattern the patient registration form's Zod schema already uses
+// (src/features/patients/schema.ts mobileRequired) — patients.phone is
+// stored as a plain 10-digit string, no country code, no formatting.
+export async function claimFamilyAccountByPhoneAndCreatePatientProfile(
+  rawPhone: string
+): Promise<{ success: true; profile: Profile } | { success: false; error: string }> {
+  let user
+  try {
+    user = await currentUser()
+  } catch {
+    return { success: false, error: 'Not authenticated' }
+  }
+  if (!user) return { success: false, error: 'Not authenticated' }
+
+  const verifiedEmail = user.emailAddresses[0]?.emailAddress
+  if (!verifiedEmail) {
+    return { success: false, error: 'Your account has no verified email address' }
+  }
+
+  const digitsOnly = rawPhone.replace(/\D/g, '')
+  if (!/^[6-9]\d{9}$/.test(digitsOnly)) {
+    return { success: false, error: 'Enter a valid 10-digit mobile number' }
+  }
+
+  const supabase = createServerSupabaseClient()
+
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('clerk_user_id', user.id)
+    .maybeSingle()
+
+  if (existing) return { success: true, profile: existing as Profile }
+
+  const { error: claimError } = await supabase.rpc('claim_family_account_by_phone', {
+    p_phone: digitsOnly,
+    p_email: verifiedEmail,
+  })
+
+  if (claimError) {
+    if (claimError.message?.includes('No patient record found')) {
+      return {
+        success: false,
+        error: 'No patient record found for that phone number. Please check with your clinic.',
+      }
+    }
+    if (claimError.message?.includes('already claimed')) {
+      return {
+        success: false,
+        error: 'This account has already been claimed by a different login.',
+      }
+    }
+    return { success: false, error: `Failed to claim family account: ${claimError.message}` }
+  }
+
+  const { data: newProfile, error: profileError } = await supabase
+    .from('profiles')
+    .insert({
+      clerk_user_id: user.id,
+      email: verifiedEmail,
+      full_name: user.firstName
+        ? `${user.firstName} ${user.lastName ?? ''}`.trim()
+        : null,
+      role: 'patient',
+      clinic_id: null,
+    })
+    .select()
+    .single()
+
+  if (profileError) {
+    return { success: false, error: `Failed to create patient profile: ${profileError.message}` }
+  }
+
+  return { success: true, profile: newProfile as Profile }
+}
+
 export function hasRole(profile: Profile | null, ...allowed: Role[]): boolean {
   return profile !== null && allowed.includes(profile.role)
 }

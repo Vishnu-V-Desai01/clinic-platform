@@ -399,6 +399,17 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
 
 // ============================================================================
 // createReceiptMessage
+//
+// Item 3b: no longer requires or links to a treatment_details document.
+// Patients view treatment details by logging into their portal
+// (/patient-portal), not via a per-payment expiring PDF link — that flow
+// now only needs the receipt document + a static portal URL.
+// generateAndStorePaymentDocuments() is still called because the receipt
+// PDF itself is still needed (and that function may still also generate
+// a treatment_details PDF for other purposes, e.g. staff-initiated
+// downloads via the existing /api/payments/[id]/treatment route — this
+// function just no longer REQUIRES that second document to exist in
+// order to send the message).
 // ============================================================================
 export async function createReceiptMessage(input: CreateReceiptMessageInput) {
   const profile = await requireRole("doctor", "staff");
@@ -469,29 +480,31 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
     .eq("clinic_id", payment.clinic_id);
 
   if (documentsError || !documents || documents.length === 0) {
-    return { success: false, error: "Could not generate or find receipt/treatment documents for this payment" };
+    return { success: false, error: "Could not generate or find the receipt document for this payment" };
   }
 
   const typedDocuments = documents as { id: string; document_type: string }[];
   const receiptDoc = typedDocuments.find((d) => d.document_type === "receipt");
-  const treatmentDoc = typedDocuments.find((d) => d.document_type === "treatment_details");
 
-  if (!receiptDoc || !treatmentDoc) {
-    return { success: false, error: "Receipt or treatment document is missing — cannot send confirmation message" };
+  if (!receiptDoc) {
+    return { success: false, error: "Receipt document is missing — cannot send confirmation message" };
   }
 
   const receiptToken = await getOrCreateActivePublicLink(supabase, receiptDoc.id, payment.clinic_id, profile.id);
-  const treatmentToken = await getOrCreateActivePublicLink(supabase, treatmentDoc.id, payment.clinic_id, profile.id);
 
-  if (!receiptToken || !treatmentToken) {
-    return { success: false, error: "Failed to create public download links for the documents" };
+  if (!receiptToken) {
+    return { success: false, error: "Failed to create a public download link for the receipt" };
   }
 
   const placeholders: ReceiptPlaceholders = {
     PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
     CLINIC_NAME: clinic.name,
     RECEIPT_LINK: buildPublicDocumentUrl(receiptToken),
-    TREATMENT_PDF_LINK: buildPublicDocumentUrl(treatmentToken),
+    // Static, non-expiring — same URL for every patient. Unlike RECEIPT_LINK
+    // this isn't a per-payment document token; it's just the portal's
+    // sign-in entry point, where a claimed family account can already
+    // view treatment history per the existing patient-portal RLS policies.
+    PROFILE_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient-portal`,
   };
 
   // See the comment on the equivalent insert in createRegistrationMessage —
@@ -995,11 +1008,11 @@ export async function getMessageClusters(): Promise<{
 // createMedicineReceiptMessage
 //
 // Mirrors createReceiptMessage above, but for medicine payments specifically.
-// createReceiptMessage hard-requires BOTH a 'receipt' and a
-// 'treatment_details' document — a medicine payment will only ever produce
-// a single 'medicine_receipt' document, so that function can never succeed
-// for a medicine payment. This is the parallel path with only one required
-// document and one placeholder (RECEIPT_LINK; no TREATMENT_PDF_LINK).
+// createReceiptMessage hard-requires a 'receipt' document (only) — a
+// medicine payment will only ever produce a single 'medicine_receipt'
+// document, so that function can never succeed for a medicine payment.
+// This is the parallel path with its own single required document and
+// single placeholder (RECEIPT_LINK).
 //
 // generateAndStoreMedicineReceipt is imported lazily inside the function
 // body (not at module top) to avoid a module-load-time dependency from the

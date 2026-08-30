@@ -145,102 +145,110 @@ const RecordsTabContent = ({
   )
 
   return (
-    <Accordion type="single" collapsible className="w-full">
-      {sortedEncounters.map((encounter) => (
-        <AccordionItem key={encounter.id} value={encounter.id}>
-          <AccordionTrigger className="hover:no-underline">
-            <div className="flex flex-col items-start gap-1 text-left">
-              <span className="font-semibold text-foreground">
-                {formatDate(encounter.encounterDate)}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                {encounter.chiefComplaint || 'Consultation'}
-              </span>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="space-y-6">
-            {encounter.diagnoses && encounter.diagnoses.length > 0 && (
-              <div>
-                <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
-                  Diagnoses
-                </h4>
-                <div className="space-y-2">
-                  {encounter.diagnoses.map((diag) => (
-                    <div key={diag.id} className="flex items-center justify-between">
-                      <span className="text-foreground">{diag.conditionName}</span>
-                      {diag.severity && (
-                        <Badge
-                          variant="outline"
-                          className={getBadgeClassesBySeverity(diag.severity)}
-                        >
-                          {diag.severity.charAt(0).toUpperCase() + diag.severity.slice(1)}
-                        </Badge>
-                      )}
-                    </div>
-                  ))}
-                </div>
+    <div className="space-y-4">
+      {/* Item 3b: caption clarifying that treatment detail depth is
+          doctor-dependent, not a system limitation. Sits above the
+          accordion, applies to every encounter in this tab. */}
+      <p className="text-xs text-muted-foreground">
+        Details below are entered by your treating doctor and may not include every minor detail from your visit.
+      </p>
+      <Accordion type="single" collapsible className="w-full">
+        {sortedEncounters.map((encounter) => (
+          <AccordionItem key={encounter.id} value={encounter.id}>
+            <AccordionTrigger className="hover:no-underline">
+              <div className="flex flex-col items-start gap-1 text-left">
+                <span className="font-semibold text-foreground">
+                  {formatDate(encounter.encounterDate)}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {encounter.chiefComplaint || 'Consultation'}
+                </span>
               </div>
-            )}
+            </AccordionTrigger>
+            <AccordionContent className="space-y-6">
+              {encounter.diagnoses && encounter.diagnoses.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
+                    Diagnoses
+                  </h4>
+                  <div className="space-y-2">
+                    {encounter.diagnoses.map((diag) => (
+                      <div key={diag.id} className="flex items-center justify-between">
+                        <span className="text-foreground">{diag.conditionName}</span>
+                        {diag.severity && (
+                          <Badge
+                            variant="outline"
+                            className={getBadgeClassesBySeverity(diag.severity)}
+                          >
+                            {diag.severity.charAt(0).toUpperCase() + diag.severity.slice(1)}
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {encounter.observations && encounter.observations.length > 0 && (
-              <div>
-                <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
-                  Observations
-                </h4>
-                <div className="space-y-1">
-                  {encounter.observations.map((obs) => (
-                    <p key={obs.id} className="text-foreground text-sm">
-                      {obs.observationType} — {obs.value} {obs.unit}
-                    </p>
-                  ))}
+              {encounter.observations && encounter.observations.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
+                    Observations
+                  </h4>
+                  <div className="space-y-1">
+                    {encounter.observations.map((obs) => (
+                      <p key={obs.id} className="text-foreground text-sm">
+                        {obs.observationType} — {obs.value} {obs.unit}
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {encounter.prescriptions && encounter.prescriptions.length > 0 && (
-              <div>
-                <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
-                  Prescriptions
-                </h4>
-                <div className="space-y-1">
-                  {encounter.prescriptions.map((pres) => (
-                    <p key={pres.id} className="text-foreground text-sm">
-                      {pres.medicineName} — {pres.dosage} · {pres.frequency} ·{' '}
-                      {pres.duration}
-                    </p>
-                  ))}
+              {encounter.prescriptions && encounter.prescriptions.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
+                    Prescriptions
+                  </h4>
+                  <div className="space-y-1">
+                    {encounter.prescriptions.map((pres) => (
+                      <p key={pres.id} className="text-foreground text-sm">
+                        {pres.medicineName} — {pres.dosage} · {pres.frequency} ·{' '}
+                        {pres.duration}
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {encounter.testResults && encounter.testResults.length > 0 && (
-              <div>
-                <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
-                  Test Results
-                </h4>
-                <div className="space-y-2">
-                  {encounter.testResults.map((test) => (
-                    <div key={test.id} className="flex items-center justify-between">
-                      <span className="text-foreground text-sm">
-                        {test.testName} — {test.resultValue}
-                      </span>
-                      {test.isAbnormal && (
-                        <Badge
-                          variant="outline"
-                          className="bg-destructive/15 text-destructive"
-                        >
-                          Abnormal
-                        </Badge>
-                      )}
-                    </div>
-                  ))}
+              {encounter.testResults && encounter.testResults.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground mb-3">
+                    Test Results
+                  </h4>
+                  <div className="space-y-2">
+                    {encounter.testResults.map((test) => (
+                      <div key={test.id} className="flex items-center justify-between">
+                        <span className="text-foreground text-sm">
+                          {test.testName} — {test.resultValue}
+                        </span>
+                        {test.isAbnormal && (
+                          <Badge
+                            variant="outline"
+                            className="bg-destructive/15 text-destructive"
+                          >
+                            Abnormal
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </div>
   )
 }
 

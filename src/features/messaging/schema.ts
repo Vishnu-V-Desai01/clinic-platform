@@ -2,10 +2,11 @@ import { z } from "zod";
 
 // ============================================================================
 // Enums — single source of truth, mirrors the CHECK constraints from the
-// Step 1 migration. If these ever drift from the DB, fix them here first.
+// Step 1 migration (and the medicine_receipt extension, Chat C). If these
+// ever drift from the DB, fix them here first.
 // ============================================================================
 
-export const MESSAGE_TYPES = ["registration", "appointment", "receipt"] as const;
+export const MESSAGE_TYPES = ["registration", "appointment", "receipt", "medicine_receipt"] as const;
 export const MESSAGE_STATUSES = ["pending", "sent", "failed", "cancelled", "expired"] as const;
 export const MESSAGE_LANGUAGES = ["en", "hi", "ta", "gu", "kn"] as const;
 export const DELIVERY_LOG_ACTIONS = ["created", "sent", "failed", "cancelled", "expired"] as const;
@@ -121,7 +122,16 @@ export const receiptPlaceholdersSchema = z.object({
   PATIENT_NAME: z.string(),
   CLINIC_NAME: z.string(),
   RECEIPT_LINK: z.string(),
-  TREATMENT_PDF_LINK: z.string(),
+  PROFILE_LINK: z.string(),
+});
+
+// Chat C — medicine receipts have no treatment_details counterpart, so this
+// is a strict subset of receiptPlaceholdersSchema (no TREATMENT_PDF_LINK),
+// not a reuse of it.
+export const medicineReceiptPlaceholdersSchema = z.object({
+  PATIENT_NAME: z.string(),
+  CLINIC_NAME: z.string(),
+  RECEIPT_LINK: z.string(),
 });
 
 // ============================================================================

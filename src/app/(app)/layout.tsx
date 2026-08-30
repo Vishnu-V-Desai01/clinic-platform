@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { getOrCreateProfile } from '@/lib/supabase/profile'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 export default async function AppLayout({
   children,
@@ -14,13 +15,33 @@ export default async function AppLayout({
 }) {
   const profile = await getOrCreateProfile()
   if (!profile) redirect('/sign-in')
-
   // Patients have a separate shell — never enter the clinical (app) group.
   if (profile.role === 'patient') redirect('/portal')
 
+  // Nav-visibility only — deliberately non-fatal. A failed fetch here should
+  // hide the Pharmacy link, not break the whole clinical shell; the real
+  // enforcement is RLS + assertPharmacyReader/assertPharmacyEnabled in
+  // src/features/pharmacy/actions.ts, not this flag.
+  let pharmacyEnabled = false
+  if (profile.clinic_id) {
+    const supabase = createServerSupabaseClient()
+    const { data: clinic, error } = await supabase
+      .from('clinics')
+      .select('pharmacy_enabled')
+      .eq('id', profile.clinic_id)
+      .single()
+      .returns<{ pharmacy_enabled: boolean }>()
+
+    if (error) {
+      console.error('[AppLayout] pharmacy_enabled fetch failed', error)
+    } else {
+      pharmacyEnabled = clinic?.pharmacy_enabled ?? false
+    }
+  }
+
   return (
     <SidebarProvider>
-      <AppSidebar profile={profile} />
+      <AppSidebar profile={profile} pharmacyEnabled={pharmacyEnabled} />
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
           <SidebarTrigger className="-ml-1" />

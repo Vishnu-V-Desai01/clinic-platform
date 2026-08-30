@@ -13,6 +13,7 @@ import {
   registrationPlaceholdersSchema,
   appointmentPlaceholdersSchema,
   receiptPlaceholdersSchema,
+  medicineReceiptPlaceholdersSchema,
   createRegistrationMessageInputSchema,
   createAppointmentMessageInputSchema,
   createReceiptMessageInputSchema,
@@ -37,6 +38,7 @@ export type MessagePlaceholders = z.infer<typeof messagePlaceholdersSchema>;
 export type RegistrationPlaceholders = z.infer<typeof registrationPlaceholdersSchema>;
 export type AppointmentPlaceholders = z.infer<typeof appointmentPlaceholdersSchema>;
 export type ReceiptPlaceholders = z.infer<typeof receiptPlaceholdersSchema>;
+export type MedicineReceiptPlaceholders = z.infer<typeof medicineReceiptPlaceholdersSchema>;
 
 export type CreateRegistrationMessageInput = z.infer<typeof createRegistrationMessageInputSchema>;
 export type CreateAppointmentMessageInput = z.infer<typeof createAppointmentMessageInputSchema>;
@@ -47,7 +49,8 @@ export type CancelMessageInput = z.infer<typeof cancelMessageInputSchema>;
 export type RecordOveragePaymentInput = z.infer<typeof recordOveragePaymentInputSchema>;
 
 // UI-only grouping — not stored in the DB, derived when messages are queried.
-// "immediate" = registration + receipt (sendable as soon as created)
+// "immediate" = registration + receipt + medicine_receipt (sendable as soon
+//   as created)
 // "scheduled" = appointment messages (appear at 4:30 AM on appointment day)
 // "archive"   = anything no longer pending (sent / cancelled / expired / failed)
 export type MessageCluster = "immediate" | "scheduled" | "archive";
