@@ -270,9 +270,12 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
                       onChange={(e) => set("lastName", e.target.value)} />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <FieldLabel htmlFor="dob" required>Date of Birth</FieldLabel>
+                    <FieldLabel htmlFor="dob">
+                      Date of Birth{" "}
+                      <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
                     <IconInput icon={Calendar} id="dob" type="date"
-                      value={values.dateOfBirth} required
+                      value={values.dateOfBirth}
                       onChange={(e) => set("dateOfBirth", e.target.value)} />
                   </div>
                   <div className="flex flex-col gap-2">

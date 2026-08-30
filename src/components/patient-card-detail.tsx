@@ -34,10 +34,11 @@ import {
 } from '@/components/ui/table'
 import { Card } from '@/components/ui/card'
 import type { PortalCardDetail } from '@/features/portal/types'
+import { calculateAge } from '@/features/patients/types'
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 // HELPERS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 
 const formatINR = (rupees: number): string => {
   return `₹${Number(rupees).toLocaleString('en-IN', {
@@ -56,23 +57,6 @@ const formatDate = (isoString: string): string => {
     }).format(date)
   } catch {
     return isoString
-  }
-}
-
-const calculatePortalAge = (dob: string | null): number | null => {
-  if (!dob) return null
-  try {
-    const birthDate = new Date(dob)
-    if (isNaN(birthDate.getTime())) return null
-    const today = new Date()
-    let age = today.getFullYear() - birthDate.getFullYear()
-    const monthDiff = today.getMonth() - birthDate.getMonth()
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--
-    }
-    return age
-  } catch {
-    return null
   }
 }
 
@@ -138,9 +122,9 @@ const getBadgeClassesByFollowUpStatus = (status: string): string => {
   return map[status] || 'bg-muted text-muted-foreground'
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 // TAB CONTENTS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 
 const RecordsTabContent = ({
   encounters,
@@ -584,9 +568,9 @@ const CarePlanTabContent = ({
   )
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 
 interface PatientCardDetailProps {
   cardDetail: PortalCardDetail
@@ -597,7 +581,7 @@ export default function PatientCardDetail({ cardDetail }: PatientCardDetailProps
   const [activeTab, setActiveTab] = useState<'records' | 'appointments' | 'payments' | 'care-plan'>('records')
 
   const fullName = `${cardDetail.firstName} ${cardDetail.lastName}`
-  const age = calculatePortalAge(cardDetail.dateOfBirth)
+  const age = calculateAge(cardDetail.dateOfBirth)
 
   const hasEmergencyContact =
     cardDetail.emergencyContactName ||

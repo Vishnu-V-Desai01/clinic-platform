@@ -62,14 +62,20 @@ export const patientFormSchema = z.object({
   // --- Basic information ---
   firstName: z.string().trim().min(1, "First name is required").max(255),
   lastName: z.string().trim().min(1, "Last name is required").max(255),
+  // Optional. Empty string becomes null (same pattern as bloodGroup /
+  // assignedDoctorId below). When a value IS given, it still has to be a
+  // real, non-future, post-1900 date.
   dateOfBirth: z
     .string()
-    .min(1, "Date of birth is required")
-    .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Enter a valid date" })
-    .refine((v) => new Date(v) <= new Date(), {
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .refine((v) => v === null || !Number.isNaN(Date.parse(v)), {
+      message: "Enter a valid date",
+    })
+    .refine((v) => v === null || new Date(v) <= new Date(), {
       message: "Date of birth can't be in the future",
     })
-    .refine((v) => new Date(v) >= new Date("1900-01-01"), {
+    .refine((v) => v === null || new Date(v) >= new Date("1900-01-01"), {
       message: "Enter a valid date",
     }),
   gender: z

@@ -81,8 +81,10 @@ describe('patientFormSchema', () => {
   })
 
   describe('dateOfBirth', () => {
-    it('rejects an empty value', () => {
-      expectMessage(parse({ dateOfBirth: '' }), 'Date of birth is required')
+    it('treats an empty string as not provided (null)', () => {
+      const result = parse({ dateOfBirth: '' })
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.dateOfBirth).toBeNull()
     })
 
     it('rejects an unparseable date', () => {
