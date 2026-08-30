@@ -2,11 +2,12 @@ import { z } from "zod";
 
 // ============================================================================
 // Enums — single source of truth, mirrors the CHECK constraints from the
-// Step 1 migration (and the medicine_receipt extension, Chat C). If these
-// ever drift from the DB, fix them here first.
+// Step 1 migration (and the medicine_receipt extension, Chat C; the
+// prescription extension, Item 6). If these ever drift from the DB, fix
+// them here first.
 // ============================================================================
 
-export const MESSAGE_TYPES = ["registration", "appointment", "receipt", "medicine_receipt"] as const;
+export const MESSAGE_TYPES = ["registration", "appointment", "receipt", "medicine_receipt", "prescription"] as const;
 export const MESSAGE_STATUSES = ["pending", "sent", "failed", "cancelled", "expired"] as const;
 export const MESSAGE_LANGUAGES = ["en", "hi", "ta", "gu", "kn"] as const;
 export const DELIVERY_LOG_ACTIONS = ["created", "sent", "failed", "cancelled", "expired"] as const;
@@ -126,12 +127,23 @@ export const receiptPlaceholdersSchema = z.object({
 });
 
 // Chat C — medicine receipts have no treatment_details counterpart, so this
-// is a strict subset of receiptPlaceholdersSchema (no TREATMENT_PDF_LINK),
+// is a strict subset of receiptPlaceholdersSchema (no PROFILE_LINK),
 // not a reuse of it.
 export const medicineReceiptPlaceholdersSchema = z.object({
   PATIENT_NAME: z.string(),
   CLINIC_NAME: z.string(),
   RECEIPT_LINK: z.string(),
+});
+
+// Item 6 — prescription documents have no payment to anchor to, so this
+// carries doctor/visit-date context the receipt schemas don't need, and
+// has no RECEIPT_LINK/PROFILE_LINK equivalent of its own.
+export const prescriptionPlaceholdersSchema = z.object({
+  PATIENT_NAME: z.string(),
+  CLINIC_NAME: z.string(),
+  DOCTOR_NAME: z.string(),
+  VISIT_DATE: z.string(),
+  PDF_LINK: z.string(),
 });
 
 // ============================================================================
@@ -148,6 +160,10 @@ export const createAppointmentMessageInputSchema = z.object({
 
 export const createReceiptMessageInputSchema = z.object({
   paymentId: z.uuid(),
+});
+
+export const createPrescriptionMessageInputSchema = z.object({
+  encounterId: z.uuid(),
 });
 
 export const sendMessageInputSchema = z.object({

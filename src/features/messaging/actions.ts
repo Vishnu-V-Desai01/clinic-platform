@@ -113,6 +113,21 @@ async function isMessageVisibleToDoctor(
     return !!data;
   }
 
+  if (message.type === 'prescription') {
+    // Prescriptions have no payment/appointment to key off of directly.
+    // Visibility mirrors registration's fallback: the patient's primary
+    // assigned doctor. A non-treating doctor sending another doctor's
+    // prescription is an edge case this doesn't specifically guard beyond
+    // that same fallback rule.
+    const { data } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('id', message.patient_id)
+      .eq('assigned_doctor_id', profile.id)
+      .maybeSingle();
+    return !!data;
+  }
+
   // Unknown message type: fail closed rather than assume visibility.
   console.error('[isMessageVisibleToDoctor] unrecognized message type:', message.type);
   return false;
@@ -870,7 +885,7 @@ export async function expireOverdueAppointmentMessages() {
 // cross-doctor case Issues 2/3 exist to handle correctly.
 //
 // Marks (not deletes) pending 'appointment' type messages as cancelled —
-// registration/receipt/medicine_receipt messages never carry
+// registration/receipt/medicine_receipt/prescription messages never carry
 // appointment_id, so they're excluded by construction, not by an
 // additional type filter that could be gotten wrong.
 // ============================================================================
@@ -925,7 +940,7 @@ export async function getMessageClusters(): Promise<{
 
   // Fetch all three clusters in parallel
   const [readyData, scheduledData, archiveData] = await Promise.all([
-    // Ready to Send: ALL pending messages (registration, receipt, appointment, medicine_receipt)
+    // Ready to Send: ALL pending messages (registration, receipt, appointment, medicine_receipt, prescription)
     supabase
       .from("message_queue")
       .select("*, appointments(status)")
@@ -1136,4 +1151,132 @@ export async function createMedicineReceiptMessage(input: CreateReceiptMessageIn
 
   revalidatePath("/dashboard/messages");
   return { success: true, messageId: medicineReceiptMessageId };
+}
+
+// ============================================================================
+// createPrescriptionMessage (Item 6)
+//
+// Mirrors createReceiptMessage/createMedicineReceiptMessage, but keyed by
+// encounterId instead of paymentId — a prescription document has no
+// payment to anchor to. Fetches patient/clinic/doctor details fresh from
+// the encounter rather than trusting anything client-supplied.
+//
+// No pre-existing-message idempotency check here, unlike the other
+// create*Message functions — message_queue has no encounter_id column to
+// key such a check on, and generateAndStorePrescriptionDocument's own
+// existing-document check already prevents duplicate PDFs. Calling this
+// twice for the same encounter reuses the same PDF but does queue a
+// second message_queue row; acceptable, since unlike receipts (which fire
+// automatically and could double-queue on a retry), this is a manual,
+// staff-initiated action behind its own UI confirmation step, so a
+// deliberate second send is a legitimate user action, not a bug to guard
+// against.
+//
+// English fallback (per Item 6 spec): if the other four languages aren't
+// yet Meta-approved when this runs, the message would fail to send in
+// those languages. sendMessage's existing template lookup already handles
+// "no template for this type/language" by failing that specific send —
+// this function does not need special-case fallback logic itself, since
+// forcing English here would contradict patients' language preference
+// once all 5 languages ARE approved. If en-only approval turns out to be
+// long-lived rather than transitional, revisit forcing English the same
+// way Item 5 did for registration.
+// ============================================================================
+export async function createPrescriptionMessage(input: { encounterId: string }) {
+  const profile = await requireRole("doctor", "staff");
+  const { encounterId } = input;
+  const supabase = createServerSupabaseClient();
+
+  const { data: encounter, error: encounterError } = await supabase
+    .from("encounters")
+    .select(
+      `id, patient_id, encounter_date,
+       patients (first_name, last_name, phone, language_preference),
+       profiles!doctor_id (full_name)`
+    )
+    .eq("id", encounterId)
+    .eq("clinic_id", profile.clinic_id)
+    .single();
+
+  if (encounterError || !encounter) {
+    return { success: false, error: "Encounter not found" };
+  }
+
+  const patient = encounter.patients as any;
+  if (!patient?.phone) {
+    return { success: false, error: "Patient has no phone number on file" };
+  }
+
+  const { data: clinic, error: clinicError } = await supabase
+    .from("clinics")
+    .select("id, name, country_code")
+    .eq("id", profile.clinic_id)
+    .single();
+
+  if (clinicError || !clinic) {
+    return { success: false, error: "Clinic not found" };
+  }
+
+  const phoneWithCountryCode = formatPhoneWithCountryCode(
+    patient.phone,
+    clinic.country_code || "IN"
+  );
+
+  const { generateAndStorePrescriptionDocument } = await import(
+    "@/features/appointments/document-storage"
+  );
+  const doc = await generateAndStorePrescriptionDocument(encounterId);
+
+  if (!doc) {
+    return { success: false, error: "Could not generate or find the prescription document" };
+  }
+
+  const token = await getOrCreateActivePublicLink(supabase, doc.id, profile.clinic_id!, profile.id);
+
+  if (!token) {
+    return { success: false, error: "Failed to create a public download link for the prescription" };
+  }
+
+  const visitDate = new Date(encounter.encounter_date).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const placeholders: Record<string, string> = {
+    PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
+    CLINIC_NAME: clinic.name,
+    DOCTOR_NAME: (encounter.profiles as any)?.full_name || "your doctor",
+    VISIT_DATE: visitDate,
+    PDF_LINK: buildPublicDocumentUrl(token),
+  };
+
+  const prescriptionMessageId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase.from("message_queue").insert({
+    id: prescriptionMessageId,
+    clinic_id: profile.clinic_id,
+    patient_id: encounter.patient_id,
+    type: "prescription",
+    language: patient.language_preference,
+    phone: phoneWithCountryCode,
+    placeholders,
+    status: "pending",
+    scheduled_send_time: new Date().toISOString(),
+    created_by: profile.id,
+  });
+
+  if (insertError) {
+    return { success: false, error: insertError.message ?? "Failed to queue prescription message" };
+  }
+
+  await supabase.from("message_delivery_logs").insert({
+    clinic_id: profile.clinic_id,
+    message_queue_id: prescriptionMessageId,
+    action: "created",
+    performed_by: profile.id,
+  });
+
+  revalidatePath("/dashboard/messages");
+  return { success: true, messageId: prescriptionMessageId };
 }

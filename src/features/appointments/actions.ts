@@ -36,12 +36,27 @@
 // works correctly regardless, since it goes through a SECURITY DEFINER
 // RPC that doesn't depend on the caller owning the appointment — but the
 // underlying status-change permission gap itself is a separate issue.
+//
+// Item 6 additions: getAppointmentById now also looks up, for a completed
+// appointment only, whether its linked encounter has any active
+// prescriptions — feeds the "Send Prescription" button on the appointment
+// detail page (see AppointmentPrescriptionSummary in ./types).
+// sendPrescriptionMessage is the new server action that button calls:
+// re-verifies the appointment is completed and re-derives the encounterId
+// server-side, then queues + immediately sends the prescription message
+// in one step (no separate "queue now, send later" state for this action).
 
 "use server"
 
+import { revalidatePath } from "next/cache"
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-import { createAppointmentMessage, suppressAppointmentMessages } from "@/features/messaging/actions"
+import {
+  createAppointmentMessage,
+  suppressAppointmentMessages,
+  createPrescriptionMessage,
+  sendMessage,
+} from "@/features/messaging/actions"
 
 import {
   cancelAppointmentSchema,
@@ -60,6 +75,7 @@ import {
   formatAppointmentTime,
   type AppointmentDetail,
   type AppointmentListItem,
+  type AppointmentPrescriptionSummary,
   type AppointmentRecord,
   type AppointmentWithContext,
   type DoctorOption,
@@ -119,7 +135,10 @@ function toListItem(row: AppointmentWithContext): AppointmentListItem {
   }
 }
 
-function toDetail(row: AppointmentWithContext): AppointmentDetail {
+function toDetail(
+  row: AppointmentWithContext,
+  prescriptionSummary?: AppointmentPrescriptionSummary,
+): AppointmentDetail {
   return {
     id:                   row.id,
     patientId:            row.patient_id,
@@ -137,6 +156,7 @@ function toDetail(row: AppointmentWithContext): AppointmentDetail {
     cancellationReason:   row.cancellation_reason,
     createdAt:            row.created_at,
     updatedAt:            row.updated_at,
+    prescriptionSummary,
   }
 }
 
@@ -342,7 +362,37 @@ export async function getAppointmentById(
       updated_at:            r.updated_at,
     }
 
-    return { success: true, data: toDetail(ctx) }
+    // Item 6: only completed appointments can have a "Send Prescription"
+    // button — look up the linked encounter and whether it has any
+    // active (non-deleted, non-stopped) prescriptions. A missing
+    // encounter for a completed appointment is treated as "no summary"
+    // rather than an error — the UI just won't show the button.
+    let prescriptionSummary: AppointmentPrescriptionSummary | undefined
+
+    if (ctx.status === "completed") {
+      const { data: encounterRow } = await supabase
+        .from("encounters")
+        .select("id")
+        .eq("appointment_id", appointmentId)
+        .eq("clinic_id", profile.clinic_id)
+        .maybeSingle()
+
+      if (encounterRow) {
+        const { count } = await supabase
+          .from("prescriptions")
+          .select("id", { count: "exact", head: true })
+          .eq("encounter_id", encounterRow.id)
+          .eq("clinic_id", profile.clinic_id)
+          .eq("status", "active")
+
+        prescriptionSummary = {
+          encounterId: encounterRow.id,
+          hasActivePrescriptions: (count ?? 0) > 0,
+        }
+      }
+    }
+
+    return { success: true, data: toDetail(ctx, prescriptionSummary) }
   } catch (err) {
     console.error("[getAppointmentById]", err)
     return { success: false, error: "Failed to load appointment." }
@@ -621,5 +671,69 @@ export async function updateAppointmentStatus(
   } catch (err) {
     console.error("[updateAppointmentStatus]", err)
     return { success: false, error: "Failed to update appointment." }
+  }
+}
+
+// ============================================================================
+// sendPrescriptionMessage (Item 6)
+//
+// Thin wrapper the UI calls directly: re-verifies the appointment is
+// completed and belongs to this clinic, re-derives the encounterId
+// server-side (never trusts a client-supplied one), then delegates to
+// createPrescriptionMessage + sendMessage. Runs both steps together since
+// the UI's confirm dialog IS the "are you sure" step — there's no
+// separate "queue now, send later" flow for this action the way receipts
+// have (receipts auto-send OR sit in Messages for staff to send
+// manually; prescriptions are always an explicit, immediate send).
+// ============================================================================
+export async function sendPrescriptionMessage(
+  appointmentId: string,
+): Promise<Result<{ messageId: string }>> {
+  const profile = await requireRole("doctor", "staff")
+
+  try {
+    const supabase = createServerSupabaseClient()
+
+    const { data: appointment, error: aptError } = await supabase
+      .from("appointments")
+      .select("id, status")
+      .eq("id", appointmentId)
+      .eq("clinic_id", profile.clinic_id)
+      .is("deleted_at", null)
+      .single()
+
+    if (aptError || !appointment) {
+      return { success: false, error: "Appointment not found." }
+    }
+    if (appointment.status !== "completed") {
+      return { success: false, error: "Prescriptions can only be sent for completed visits." }
+    }
+
+    const { data: encounter, error: encError } = await supabase
+      .from("encounters")
+      .select("id")
+      .eq("appointment_id", appointmentId)
+      .eq("clinic_id", profile.clinic_id)
+      .maybeSingle()
+
+    if (encError || !encounter) {
+      return { success: false, error: "No visit record found for this appointment." }
+    }
+
+    const createResult = await createPrescriptionMessage({ encounterId: encounter.id })
+    if (!createResult.success || !createResult.messageId) {
+      return { success: false, error: createResult.error ?? "Failed to prepare the prescription message." }
+    }
+
+    const sendResult = await sendMessage({ messageId: createResult.messageId })
+    if (!sendResult.success) {
+      return { success: false, error: sendResult.error ?? "Prescription was prepared but could not be sent." }
+    }
+
+    revalidatePath(`/dashboard/appointments/${appointmentId}`)
+    return { success: true, data: { messageId: createResult.messageId } }
+  } catch (err) {
+    console.error("[sendPrescriptionMessage]", err)
+    return { success: false, error: "Failed to send prescription." }
   }
 }

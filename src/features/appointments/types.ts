@@ -67,6 +67,21 @@ export interface AppointmentListItem {
   chiefComplaint:  string | null
 }
 
+/* -------------------- Prescription summary (Item 6) --------------------- */
+//
+// Minimal shape the "Send Prescription" button needs: whether a completed
+// visit's encounter has any active prescriptions at all, plus the
+// encounterId to act on. Only populated when status === 'completed' —
+// scheduled/cancelled/no_show appointments never have an encounter to
+// check. Full prescription line details aren't needed here; the send
+// action re-fetches them itself at generation time (same "don't trust
+// client-provided IDs for anything, re-derive server-side" pattern used
+// throughout this codebase).
+export interface AppointmentPrescriptionSummary {
+  encounterId: string
+  hasActivePrescriptions: boolean
+}
+
 /* -------------------- Detail view (display shape) ----------------------- */
 
 export interface AppointmentDetail {
@@ -86,6 +101,12 @@ export interface AppointmentDetail {
   cancellationReason: string | null
   createdAt: string
   updatedAt: string
+  // Item 6: populated only for completed appointments with a linked
+  // encounter. Undefined for scheduled/cancelled/no_show, or a completed
+  // appointment whose encounter lookup found nothing (shouldn't normally
+  // happen, but the UI treats "no summary" as "don't show the button"
+  // rather than erroring).
+  prescriptionSummary?: AppointmentPrescriptionSummary
 }
 
 /* -------------------- Doctor option (for booking form) ------------------ */

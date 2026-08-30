@@ -20,6 +20,7 @@ import {
 import { updateAppointmentStatus } from "../actions"
 import RescheduleDialog from "./reschedule-dialog"
 import CancelDialog from "./cancel-dialog"
+import SendPrescriptionDialog from "./send-prescription-dialog"
 
 const STATUS_STYLES: Record<AppointmentStatus, string> = {
   scheduled: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
@@ -111,10 +112,11 @@ export default function AppointmentDetailView({
   const isDoctor    = userRole === "doctor"
   const isScheduled = appointment.status === "scheduled"
 
-  const [rescheduleOpen, setRescheduleOpen] = useState(false)
-  const [cancelOpen,     setCancelOpen]     = useState(false)
-  const [statusError,    setStatusError]    = useState<string | null>(null)
-  const [isPending,      startTransition]   = useTransition()
+  const [rescheduleOpen,       setRescheduleOpen]       = useState(false)
+  const [cancelOpen,           setCancelOpen]           = useState(false)
+  const [sendPrescriptionOpen, setSendPrescriptionOpen] = useState(false)
+  const [statusError,          setStatusError]          = useState<string | null>(null)
+  const [isPending,            startTransition]         = useTransition()
 
   function handleMarkStatus(status: "completed" | "no_show") {
     setStatusError(null)
@@ -195,6 +197,19 @@ export default function AppointmentDetailView({
                 </Button>
               </>
             )}
+          </div>
+        )}
+
+        {/* Item 6: Send Prescription — only for completed visits with
+            active prescriptions on record. */}
+        {appointment.status === "completed" && appointment.prescriptionSummary?.hasActivePrescriptions && (
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setSendPrescriptionOpen(true)}
+            >
+              Send Prescription
+            </Button>
           </div>
         )}
 
@@ -316,6 +331,13 @@ export default function AppointmentDetailView({
         patientName={appointment.patientName}
         appointmentDateTime={`${appointment.appointmentDate}T${appointment.appointmentTime}:00+05:30`}
         onSuccess={() => { setCancelOpen(false); router.refresh() }}
+      />
+
+      <SendPrescriptionDialog
+        open={sendPrescriptionOpen}
+        onOpenChange={setSendPrescriptionOpen}
+        appointmentId={appointment.id}
+        patientName={appointment.patientName}
       />
     </>
   )
