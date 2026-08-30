@@ -43,6 +43,13 @@
 //     (so the UI can show a clear message before the user starts editing)
 //     and completeVisit (in case the client's prefill data was stale by
 //     the time save is submitted).
+//
+// Item 7 addition: searchPastMedicineNames — a debounced, clinic-scoped
+// autocomplete source for PrescriptionsCard, distinct from the pharmacy
+// catalogue lookup (which lives in features/pharmacy/actions.ts). Queries
+// prescriptions.medicine_name directly (clinic_id is a column on that
+// table already, no join needed) so a doctor gets suggestions even for
+// medicines never added to the pharmacy catalogue.
 
 'use server'
 
@@ -194,6 +201,61 @@ const EDIT_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
 function isWithinEditWindow(appointmentDateISO: string): boolean {
   const appointmentTime = new Date(appointmentDateISO).getTime()
   return Date.now() - appointmentTime <= EDIT_WINDOW_MS
+}
+
+// ─── searchPastMedicineNames (Item 7) ───────────────────────────────────────
+//
+// Second autocomplete source alongside the pharmacy catalogue in
+// PrescriptionsCard: distinct medicine names this clinic has actually
+// prescribed before, even ones never matched to a pharmacy_drugs row (free
+// text). DISTINCT-by-name (case-insensitive, in JS after fetch — Supabase's
+// query builder can't express DISTINCT ON directly) collapses case variants
+// ("Amoxicillin" / "amoxicillin") into one suggestion, keeping whichever
+// casing was used most recently; the stored casing itself is never
+// rewritten. Clinic-scoped directly via prescriptions.clinic_id (no join
+// through encounters needed — the column is already on the row). Minimum
+// 2-character query and a capped result count keep this cheap; the client
+// debounces calls, this doesn't need to.
+
+const MIN_MEDICINE_SEARCH_LENGTH = 2
+const MAX_MEDICINE_SEARCH_RESULTS = 8
+
+export async function searchPastMedicineNames(query: string): Promise<string[]> {
+  const profile = await getOrCreateProfile()
+  if (!profile || !['doctor', 'staff'].includes(profile.role)) return []
+
+  const clinicId = profile.clinic_id
+  if (!clinicId) return []
+
+  const trimmed = query.trim()
+  if (trimmed.length < MIN_MEDICINE_SEARCH_LENGTH) return []
+
+  const supabase = createServerSupabaseClient()
+
+  const { data, error } = await supabase
+    .from('prescriptions')
+    .select('medicine_name, created_at')
+    .eq('clinic_id', clinicId)
+    .ilike('medicine_name', `%${trimmed}%`)
+    .order('created_at', { ascending: false })
+    .limit(50) // over-fetch before de-duping in JS
+
+  if (error) {
+    console.error('[searchPastMedicineNames]', error)
+    return []
+  }
+
+  const seen = new Set<string>()
+  const results: string[] = []
+  for (const row of data ?? []) {
+    const key = row.medicine_name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    results.push(row.medicine_name)
+    if (results.length >= MAX_MEDICINE_SEARCH_RESULTS) break
+  }
+
+  return results
 }
 
 // ─── getVisitPrefill ──────────────────────────────────────────────────────────

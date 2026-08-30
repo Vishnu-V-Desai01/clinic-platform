@@ -26,6 +26,17 @@
 //     catalogue only (pharmacy_drugs, doctor-visible per the Chat A RLS
 //     split), never pharmacy_inventory, so a doctor without pharmacy_access
 //     never sees stock data through this component.
+//
+// Item 7 addition: a second autocomplete source layered onto the SAME
+// dropdown as the catalogue suggestions — distinct medicine names this
+// clinic has prescribed before, even ones never matched to a catalogue
+// drug. Fetched via a debounced server action (searchPastMedicineNames),
+// since past-prescription names live in a different table the catalogue
+// (already loaded client-side in full) doesn't cover. Catalogue matches
+// are listed first (richer detail available), then past-name matches not
+// already covered by a catalogue result, case-insensitively de-duplicated.
+// A past-name suggestion carries no drugId when selected — it's exactly
+// equivalent to typing that text manually, just faster.
 
 'use client'
 
@@ -50,6 +61,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { listDrugs } from '@/features/pharmacy/actions'
+import { searchPastMedicineNames } from '../actions'
 import { PHARMACY_DRUG_FORM_LABELS, type PharmacyDrugRow } from '@/features/pharmacy/types'
 import type { PrescriptionLine } from '../types'
 
@@ -79,7 +91,10 @@ const emptyForm = {
   instructions: '',
 }
 
-const MAX_SUGGESTIONS = 6
+const MAX_CATALOGUE_SUGGESTIONS = 6
+const MAX_PAST_NAME_SUGGESTIONS = 4
+const PAST_NAME_SEARCH_DEBOUNCE_MS = 250
+const PAST_NAME_MIN_QUERY_LENGTH = 2
 
 function drugDisplayLabel(drug: PharmacyDrugRow): string {
   const parts = [drug.name]
@@ -93,6 +108,14 @@ function drugSubLabel(drug: PharmacyDrugRow): string {
   return bits.join(' · ')
 }
 
+// Collapses runs of internal whitespace and trims — applied on save so the
+// stored name is clean without ever changing its casing (a brand name like
+// "Crocin" shouldn't be lowercased just because search comparisons are
+// case-insensitive).
+function normalizeMedicineName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ')
+}
+
 export default function PrescriptionsCard({ value, onChange }: PrescriptionsCardProps) {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm]         = useState(emptyForm)
@@ -103,6 +126,14 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
   // autocomplete/picker silently offer nothing — free text still works.
   const [drugs, setDrugs]             = useState<PharmacyDrugRow[]>([])
   const [drugsLoaded, setDrugsLoaded] = useState(false)
+
+  // Item 7: past-prescription-name suggestions, debounced against the
+  // server. Kept separate from the catalogue's instant in-memory filter —
+  // the catalogue has no network cost so it stays snappy; this one does,
+  // so it gets its own debounce and minimum-length gate.
+  const [pastNames, setPastNames]           = useState<string[]>([])
+  const pastNamesDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pastNamesRequestId = useRef(0)
 
   const [showSuggestions, setShowSuggestions] = useState(false)
   const suggestionsBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -120,13 +151,49 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     return () => { cancelled = true }
   }, [])
 
-  const suggestions = useMemo(() => {
+  // Debounced fetch of past-prescription-name matches whenever the typed
+  // name changes. requestId guards against an earlier, slower request
+  // resolving after a newer one and clobbering fresher results.
+  useEffect(() => {
+    const query = form.medicineName.trim()
+
+    if (pastNamesDebounce.current) clearTimeout(pastNamesDebounce.current)
+
+    if (query.length < PAST_NAME_MIN_QUERY_LENGTH) {
+      setPastNames([])
+      return
+    }
+
+    pastNamesDebounce.current = setTimeout(() => {
+      const thisRequestId = ++pastNamesRequestId.current
+      searchPastMedicineNames(query).then((names) => {
+        if (thisRequestId !== pastNamesRequestId.current) return // stale response, ignore
+        setPastNames(names)
+      })
+    }, PAST_NAME_SEARCH_DEBOUNCE_MS)
+
+    return () => {
+      if (pastNamesDebounce.current) clearTimeout(pastNamesDebounce.current)
+    }
+  }, [form.medicineName])
+
+  const catalogueSuggestions = useMemo(() => {
     const query = form.medicineName.trim().toLowerCase()
     if (!query) return []
     return drugs
       .filter((d) => d.name.toLowerCase().includes(query))
-      .slice(0, MAX_SUGGESTIONS)
+      .slice(0, MAX_CATALOGUE_SUGGESTIONS)
   }, [drugs, form.medicineName])
+
+  // Past-name suggestions, with anything already represented by a
+  // catalogue match above filtered out (case-insensitive), so a drug in
+  // the catalogue never appears twice in the same dropdown.
+  const pastNameSuggestions = useMemo(() => {
+    const catalogueNames = new Set(catalogueSuggestions.map((d) => d.name.toLowerCase()))
+    return pastNames
+      .filter((name) => !catalogueNames.has(name.toLowerCase()))
+      .slice(0, MAX_PAST_NAME_SUGGESTIONS)
+  }, [pastNames, catalogueSuggestions])
 
   const pickerResults = useMemo(() => {
     const query = pickerSearch.trim().toLowerCase()
@@ -147,10 +214,11 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     onChange(value.map((rx) => rx.localId === localId ? { ...rx, isDeleted: true } : rx))
 
   const handleAdd = () => {
-    if (!form.medicineName.trim()) return
+    const cleanName = normalizeMedicineName(form.medicineName)
+    if (!cleanName) return
     const newLine: PrescriptionLine = {
       localId:      crypto.randomUUID(),
-      medicineName: form.medicineName.trim(),
+      medicineName: cleanName,
       drugId:       form.drugId,
       dosage:       form.dosage.trim()       || undefined,
       frequency:    form.frequency           || undefined,
@@ -176,6 +244,15 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     setShowSuggestions(false)
   }
 
+  // Selecting a past-prescription-name suggestion is exactly equivalent to
+  // typing that text manually — no drugId, since it was never matched to
+  // a catalogue row (if it had been, it would show as a catalogue
+  // suggestion instead and this path wouldn't apply).
+  const selectPastName = (name: string) => {
+    setForm((f) => ({ ...f, medicineName: name, drugId: undefined }))
+    setShowSuggestions(false)
+  }
+
   const selectFromPicker = (drug: PharmacyDrugRow) => {
     selectDrug(drug)
     setPickerOpen(false)
@@ -192,6 +269,8 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     if (suggestionsBlurTimeout.current) clearTimeout(suggestionsBlurTimeout.current)
     if (form.medicineName.trim()) setShowSuggestions(true)
   }
+
+  const hasAnySuggestions = catalogueSuggestions.length > 0 || pastNameSuggestions.length > 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -295,11 +374,11 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                     onFocus={handleNameFocus}
                     onBlur={handleNameBlur}
                   />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                      {suggestions.map((drug) => (
+                  {showSuggestions && hasAnySuggestions && (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                      {catalogueSuggestions.map((drug) => (
                         <button
-                          key={drug.id}
+                          key={`catalogue-${drug.id}`}
                           type="button"
                           className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
                           onMouseDown={(e) => e.preventDefault()} // keep input focus so onBlur's timeout doesn't race this click
@@ -309,6 +388,25 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                           <span className="text-xs text-muted-foreground">{drugSubLabel(drug)}</span>
                         </button>
                       ))}
+                      {pastNameSuggestions.length > 0 && (
+                        <>
+                          {catalogueSuggestions.length > 0 && (
+                            <div className="border-t border-border" />
+                          )}
+                          {pastNameSuggestions.map((name) => (
+                            <button
+                              key={`past-${name}`}
+                              type="button"
+                              className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => selectPastName(name)}
+                            >
+                              <span className="font-medium text-foreground">{name}</span>
+                              <span className="text-xs text-muted-foreground">Previously prescribed</span>
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
