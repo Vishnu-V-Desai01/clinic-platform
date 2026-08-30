@@ -91,6 +91,14 @@ export function RemindersClient({
   const overageRupees = ((overageCount * overageRatePaise) / 100).toLocaleString("en-IN", {
     maximumFractionDigits: 2,
   });
+  // Per-message overage rate, formatted for the info banner below. Was
+  // previously a hardcoded "₹1.50" string that ignored this prop entirely —
+  // now it actually reflects overageRatePaise, so a future pricing change
+  // only needs the constants module / DB default updated, not this file.
+  const overageRateRupees = (overageRatePaise / 100).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
   const remaining = Math.max(0, includedLimit - messagesSent);
   const isOverage = messagesSent > includedLimit;
 
@@ -348,7 +356,7 @@ export function RemindersClient({
       <div className="bg-muted/50 rounded-lg p-4 flex gap-3 items-start">
         <Info className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
         <p className="text-sm text-muted-foreground">
-          Messages reset on the 1st of each month. Overages are billed at ₹1.50 per message.
+          Messages reset on the 1st of each month. Overages are billed at ₹{overageRateRupees} per message.
         </p>
       </div>
 

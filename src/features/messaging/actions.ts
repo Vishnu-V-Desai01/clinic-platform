@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/profile";
 import { generateAndStorePaymentDocuments } from "@/features/payments/document-storage";
+import { INCLUDED_MESSAGE_LIMIT, OVERAGE_RATE_PAISE } from "@/lib/config/messaging";
 import {
   createRegistrationMessageInputSchema,
   createAppointmentMessageInputSchema,
@@ -51,7 +52,7 @@ function formatPhoneWithCountryCode(phone: string, countryCode: string): string 
   return phone.startsWith(code) ? phone : `${code}${phone}`;
 }
 
-// ── Message visibility scoping (Issue 3, re-scoped) ─────────────────────────
+// ── Message visibility scoping (Issue 3, re-scoped) ────────────────
 //
 // Visibility now mirrors WHICH doctor the message's underlying record
 // actually belongs to, not the patient's primary assignment — matching
@@ -206,9 +207,23 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
    LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient-portal`,
   };
 
-  const { data: inserted, error: insertError } = await supabase
+  // Generate the id client-side and skip the post-insert .select() re-read.
+  // Supabase's .insert().select() pattern immediately re-selects the row
+  // it just wrote, and that re-select is subject to the same RESTRICTIVE
+  // SELECT policy (message_queue_doctor_scoped_select) as any other read —
+  // for a caller who doesn't satisfy that policy for THIS message's type
+  // (e.g. a doctor who isn't the treating doctor, triggering this
+  // indirectly), the write succeeds but the re-select fails, and Postgres
+  // reports that as "row violates policy" even though the insert worked.
+  // Knowing the id upfront avoids the re-select entirely — this is a
+  // system-initiated queue insert, not a user-facing read, so there's
+  // nothing lost by not reading it back.
+  const registrationMessageId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase
     .from("message_queue")
     .insert({
+      id: registrationMessageId,
       clinic_id: patient.clinic_id,
       patient_id: patient.id,
       type: "registration",
@@ -218,23 +233,21 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
       status: "pending",
       scheduled_send_time: new Date().toISOString(),
       created_by: profile.id,
-    })
-    .select("id")
-    .single();
+    });
 
-  if (insertError || !inserted) {
-    return { success: false, error: insertError?.message ?? "Failed to queue registration message" };
+  if (insertError) {
+    return { success: false, error: insertError.message ?? "Failed to queue registration message" };
   }
 
   await supabase.from("message_delivery_logs").insert({
     clinic_id: patient.clinic_id,
-    message_queue_id: inserted.id,
+    message_queue_id: registrationMessageId,
     action: "created",
     performed_by: profile.id,
   });
 
   revalidatePath("/dashboard/messages");
-  return { success: true, messageId: inserted.id };
+  return { success: true, messageId: registrationMessageId };
 }
 
 // ============================================================================
@@ -334,9 +347,18 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
   const computed = getLocalTimeAsUtc(appointmentDate, timeZone, 4, 30);
   const scheduledSendTime = computed < new Date() ? new Date() : computed;
 
-  const { data: inserted, error: insertError } = await supabase
+  // See the comment on the equivalent insert in createRegistrationMessage
+  // above — generating the id client-side avoids a post-insert re-select
+  // that would otherwise be subject to message_queue_doctor_scoped_select
+  // RLS. This one matters especially here: rescheduleAppointment calls
+  // this function, and the caller triggering a reschedule is not
+  // necessarily the appointment's treating doctor.
+  const appointmentMessageId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase
     .from("message_queue")
     .insert({
+      id: appointmentMessageId,
       clinic_id: appointment.clinic_id,
       patient_id: patient.id,
       appointment_id: appointment.id,
@@ -348,23 +370,21 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
       scheduled_send_time: scheduledSendTime.toISOString(),
       expires_at: appointment.appointment_date,
       created_by: profile.id,
-    })
-    .select("id")
-    .single();
+    });
 
-  if (insertError || !inserted) {
-    return { success: false, error: insertError?.message ?? "Failed to queue appointment message" };
+  if (insertError) {
+    return { success: false, error: insertError.message ?? "Failed to queue appointment message" };
   }
 
   await supabase.from("message_delivery_logs").insert({
     clinic_id: appointment.clinic_id,
-    message_queue_id: inserted.id,
+    message_queue_id: appointmentMessageId,
     action: "created",
     performed_by: profile.id,
   });
 
   revalidatePath("/dashboard/messages");
-  return { success: true, messageId: inserted.id };
+  return { success: true, messageId: appointmentMessageId };
 }
 
 // ============================================================================
@@ -464,9 +484,15 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
     TREATMENT_PDF_LINK: buildPublicDocumentUrl(treatmentToken),
   };
 
-  const { data: inserted, error: insertError } = await supabase
+  // See the comment on the equivalent insert in createRegistrationMessage —
+  // generating the id client-side avoids a post-insert re-select subject
+  // to message_queue_doctor_scoped_select RLS.
+  const receiptMessageId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase
     .from("message_queue")
     .insert({
+      id: receiptMessageId,
       clinic_id: payment.clinic_id,
       patient_id: patient.id,
       payment_id: payment.id,
@@ -477,23 +503,21 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
       status: "pending",
       scheduled_send_time: new Date().toISOString(),
       created_by: profile.id,
-    })
-    .select("id")
-    .single();
+    });
 
-  if (insertError || !inserted) {
-    return { success: false, error: insertError?.message ?? "Failed to queue receipt message" };
+  if (insertError) {
+    return { success: false, error: insertError.message ?? "Failed to queue receipt message" };
   }
 
   await supabase.from("message_delivery_logs").insert({
     clinic_id: payment.clinic_id,
-    message_queue_id: inserted.id,
+    message_queue_id: receiptMessageId,
     action: "created",
     performed_by: profile.id,
   });
 
   revalidatePath("/dashboard/messages");
-  return { success: true, messageId: inserted.id };
+  return { success: true, messageId: receiptMessageId };
 }
 
 // ============================================================================
@@ -754,10 +778,16 @@ export async function getClinicMessageUsage(): Promise<{
     };
   }
 
+  // No usage row exists yet for this clinic this month (no message has
+  // been sent yet, so the trg_increment_message_usage trigger hasn't
+  // fired). Fall back to the same INCLUDED_MESSAGE_LIMIT /
+  // OVERAGE_RATE_PAISE constants the DB column defaults were set to in
+  // Item 8's migration — kept in one place (src/lib/config/messaging.ts)
+  // so this fallback can never drift from what a real row would get.
   return {
     messages_sent: 0,
-    included_limit: 250,
-    overage_rate_paise: 150,
+    included_limit: INCLUDED_MESSAGE_LIMIT,
+    overage_rate_paise: OVERAGE_RATE_PAISE,
     overage_count: 0,
     overage_amount_paise: 0,
     is_settled: false,
@@ -1049,9 +1079,15 @@ export async function createMedicineReceiptMessage(input: CreateReceiptMessageIn
     RECEIPT_LINK: buildPublicDocumentUrl(receiptToken),
   };
 
-  const { data: inserted, error: insertError } = await supabase
+  // See the comment on the equivalent insert in createRegistrationMessage —
+  // generating the id client-side avoids a post-insert re-select subject
+  // to message_queue_doctor_scoped_select RLS.
+  const medicineReceiptMessageId = crypto.randomUUID();
+
+  const { error: insertError } = await supabase
     .from("message_queue")
     .insert({
+      id: medicineReceiptMessageId,
       clinic_id: payment.clinic_id,
       patient_id: patient.id,
       payment_id: payment.id,
@@ -1062,21 +1098,19 @@ export async function createMedicineReceiptMessage(input: CreateReceiptMessageIn
       status: "pending",
       scheduled_send_time: new Date().toISOString(),
       created_by: profile.id,
-    })
-    .select("id")
-    .single();
+    });
 
-  if (insertError || !inserted) {
-    return { success: false, error: insertError?.message ?? "Failed to queue medicine receipt message" };
+  if (insertError) {
+    return { success: false, error: insertError.message ?? "Failed to queue medicine receipt message" };
   }
 
   await supabase.from("message_delivery_logs").insert({
     clinic_id: payment.clinic_id,
-    message_queue_id: inserted.id,
+    message_queue_id: medicineReceiptMessageId,
     action: "created",
     performed_by: profile.id,
   });
 
   revalidatePath("/dashboard/messages");
-  return { success: true, messageId: inserted.id };
+  return { success: true, messageId: medicineReceiptMessageId };
 }
