@@ -2,6 +2,10 @@
 
 import { z } from 'zod';
 
+// show_branding_footer removed from validation — Item 9 made the
+// watermark mandatory and non-configurable. The DB column still exists
+// (additive-only migrations) but is no longer read or written anywhere
+// in the app.
 export const UpdateClinicSettingsSchema = z.object({
   name: z.string().min(1, 'Clinic name is required').max(100),
   address: z.string().max(500).nullish(),
@@ -13,5 +17,4 @@ export const UpdateClinicSettingsSchema = z.object({
   license_number: z.string().max(100).nullish(),
   gst_number: z.string().max(15).nullish(),
   hfr_id: z.string().max(100).nullish(),
-  show_branding_footer: z.boolean(),
 });

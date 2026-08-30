@@ -65,9 +65,13 @@ export async function GET(
   // are already guaranteed identical by the filter above, so this is a
   // no-op change for them. For patients (profile.clinic_id is null) this
   // is the actual fix: it resolves the real clinic regardless of caller role.
+  // show_branding_footer is no longer selected — Item 9 removed the
+  // disable-watermark setting; the watermark is now unconditional, so
+  // this column is never read here. The column itself remains in the DB
+  // (additive-only migrations), just deprecated and unused.
   const { data: clinic } = await supabase
     .from('clinics')
-    .select('name, address, city, state, postal_code, phone, email, license_number, gst_number, hfr_id, show_branding_footer')
+    .select('name, address, city, state, postal_code, phone, email, license_number, gst_number, hfr_id')
     .eq('id', payment.clinic_id)
     .single();
 
@@ -130,7 +134,7 @@ export async function GET(
 
     const collections: any[] = payment.payment_collections || [];
 
-    // ── 1. HEADER ──────────────────────────────────────────────────
+    // ── 1. HEADER ─────────────────────────────────────────────────
     const HH = 90;
     page.drawRectangle({ x: 0, y: height - HH, width, height: HH, color: teal });
     page.drawRectangle({ x: 0, y: height - 5,  width, height: 5,  color: tealDk });
@@ -176,7 +180,7 @@ export async function GET(
       size: 38, font: fontBold, color: white, opacity: 0.10,
     });
 
-    // ── 2. META BAR ────────────────────────────────────────────────
+    // ── 2. META BAR ───────────────────────────────────────────────
     const MB  = 40;
     const mbY = height - HH - MB;
     page.drawRectangle({ x: 0, y: mbY, width, height: MB, color: tealTint });
@@ -211,7 +215,7 @@ export async function GET(
 
     let y = mbY - 24;
 
-    // ── 3. BILLED TO / SERVICE ────────────────────────────────────
+    // ── 3. BILLED TO / SERVICE ───────────────────────────────────
     const c1 = margin;
     const c2 = width / 2 + 8;
     const cw = width / 2 - margin - 8;
@@ -267,7 +271,7 @@ export async function GET(
     );
     y -= 22;
 
-    // ── 4. ITEMISED BILL TABLE (only when line items exist) ────────
+    // ── 4. ITEMISED BILL TABLE (only when line items exist) ──────
     if (hasLineItems) {
       // Section label
       page.drawText('ITEMISED BILL', {
@@ -405,7 +409,7 @@ export async function GET(
       y -= 8; // existing charges without line items: small gap before summary box
     }
 
-    // ── 5. AMOUNT SUMMARY BOX ─────────────────────────────────────
+    // ── 5. AMOUNT SUMMARY BOX ────────────────────────────────────
     const boxH = 80;
     const boxY = y - boxH;
     const t3   = inner / 3;
@@ -484,7 +488,7 @@ export async function GET(
 
     y = boxY - 24;
 
-    // ── 6. COLLECTION HISTORY TABLE ───────────────────────────────
+    // ── 6. COLLECTION HISTORY TABLE ──────────────────────────────
     if (collections.length > 0) {
       page.drawText('COLLECTION HISTORY', {
         x: margin, y, size: 6.5, font: fontBold, color: teal,
@@ -550,7 +554,7 @@ export async function GET(
       y -= 8;
     }
 
-    // ── 7. FOOTER ──────────────────────────────────────────────────
+    // ── 7. FOOTER ─────────────────────────────────────────────────
     const ftY = 48;
     page.drawLine({
       start: { x: margin, y: ftY + 30 },
@@ -573,14 +577,15 @@ export async function GET(
       });
     }
 
-    if (clinic?.show_branding_footer) {
-      const brand  = 'Powered by CURA HealthTech';
-      const brandW = fontReg.widthOfTextAtSize(brand, 7);
-      page.drawText(brand, {
-        x: width - margin - brandW, y: ftY + 6,
-        size: 7, font: fontReg, color: rgb(0.80, 0.80, 0.80),
-      });
-    }
+    // Watermark is mandatory brand distribution — always rendered,
+    // never gated by a clinic setting. Item 9: the disable-watermark
+    // option was removed; this is now unconditional for every clinic.
+    const brand  = 'powered by Curakin HealthTech';
+    const brandW = fontReg.widthOfTextAtSize(brand, 7);
+    page.drawText(brand, {
+      x: width - margin - brandW, y: ftY + 6,
+      size: 7, font: fontReg, color: rgb(0.80, 0.80, 0.80),
+    });
 
     const pdfBytes = await pdfDoc.save();
 

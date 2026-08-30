@@ -48,6 +48,10 @@ export async function updateClinicSettings(
 
     const validatedInput = UpdateClinicSettingsSchema.parse(input);
 
+    // show_branding_footer is no longer written — Item 9 made the
+    // watermark mandatory. The column stays in the DB (additive-only
+    // migrations) but this update no longer touches it, so it's frozen
+    // at whatever value it last held.
     const { error } = await supabase
       .from('clinics')
       .update({
@@ -61,7 +65,6 @@ export async function updateClinicSettings(
         license_number: validatedInput.license_number || null,
         gst_number: validatedInput.gst_number || null,
         hfr_id: validatedInput.hfr_id || null,
-        show_branding_footer: validatedInput.show_branding_footer,
         updated_at: new Date().toISOString(),
       })
       .eq('id', profile.clinic_id);

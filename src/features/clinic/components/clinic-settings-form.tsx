@@ -29,9 +29,6 @@ export default function ClinicSettingsForm({
   const [licenseNumber, setLicenseNumber] = useState(clinic.license_number || '');
   const [gstNumber, setGstNumber] = useState(clinic.gst_number || '');
   const [hfrId, setHfrId] = useState(clinic.hfr_id || '');
-  const [showBrandingFooter, setShowBrandingFooter] = useState(
-    clinic.show_branding_footer ?? true
-  );
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -64,7 +61,6 @@ export default function ClinicSettingsForm({
         license_number: licenseNumber.trim() || null,
         gst_number: gstNumber.trim() || null,
         hfr_id: hfrId.trim() || null,
-        show_branding_footer: showBrandingFooter,
       });
 
       if (!result.success) {
@@ -266,40 +262,6 @@ export default function ClinicSettingsForm({
                 placeholder="560001"
                 className={inputClass}
               />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Document Settings */}
-      <Card className="bg-card border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold text-foreground">
-            Document Settings
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-start gap-3">
-            <input
-              id="branding-toggle"
-              type="checkbox"
-              checked={showBrandingFooter}
-              onChange={(e) => {
-                if (canEdit) setShowBrandingFooter(e.target.checked);
-              }}
-              disabled={!canEdit}
-              className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
-            />
-            <div>
-              <Label
-                htmlFor="branding-toggle"
-                className="text-sm font-medium text-foreground cursor-pointer"
-              >
-                Show &ldquo;Powered by CURA&rdquo; on receipts
-              </Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Adds a small, unobtrusive footer to receipts and treatment documents.
-              </p>
             </div>
           </div>
         </CardContent>

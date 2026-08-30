@@ -42,9 +42,13 @@ export async function GET(
     return new NextResponse('Payment not found', { status: 404 });
   }
 
+  // show_branding_footer is no longer selected — Item 9 removed the
+  // disable-watermark setting; the watermark is now unconditional, so
+  // this column is never read here. The column itself remains in the DB
+  // (additive-only migrations), just deprecated and unused.
   const { data: clinic } = await supabase
     .from('clinics')
-    .select('name, address, city, state, postal_code, phone, email, license_number, gst_number, show_branding_footer')
+    .select('name, address, city, state, postal_code, phone, email, license_number, gst_number')
     .eq('id', profile.clinic_id)
     .single();
 
@@ -75,7 +79,7 @@ export async function GET(
     const margin = 40;
     const inner  = W - margin * 2;
 
-    // ── Design tokens ──────────────────────────────────────────────
+    // ── Design tokens ─────────────────────────────────────────────
     const teal     = rgb(0.05, 0.52, 0.52);
     const tealDk   = rgb(0.03, 0.38, 0.38);
     const tealTint = rgb(0.92, 0.98, 0.98);
@@ -203,7 +207,7 @@ export async function GET(
 
     y = mbY - 22;
 
-    // ── 3. PATIENT CARD ───────────────────────────────────────────
+    // ── 3. PATIENT CARD ──────────────────────────────────────────
     const pCardH = 66;
     const pCardY = y - pCardH;
 
@@ -249,7 +253,7 @@ export async function GET(
 
     y = pCardY - 22;
 
-    // ── 4. MEDICAL PROFILE ────────────────────────────────────────
+    // ── 4. MEDICAL PROFILE ───────────────────────────────────────
     const allergies:  string[] = payment.patients?.allergies  || [];
     const conditions: string[] = payment.patients?.conditions || [];
     const pNotes = payment.patients?.notes;
@@ -268,7 +272,7 @@ export async function GET(
       y -= 14;
     }
 
-    // ── 5. ENCOUNTER HISTORY ──────────────────────────────────────
+    // ── 5. ENCOUNTER HISTORY ─────────────────────────────────────
     checkPage(80);
     drawT('ENCOUNTER HISTORY', { font: fontBold, size: 6.5, color: teal });
     y -= 3;
@@ -352,14 +356,16 @@ export async function GET(
     if (payment.receipt_number) {
       drawT('Receipt No: ' + payment.receipt_number, { size: 7.5, color: muted });
     }
-    if (clinic?.show_branding_footer) {
-      const brand  = 'Powered by CURA HealthTech';
-      const brandW = fontReg.widthOfTextAtSize(brand, 7);
-      page.drawText(brand, {
-        x: W - margin - brandW, y,
-        size: 7, font: fontReg, color: rgb(0.80, 0.80, 0.80),
-      });
-    }
+
+    // Watermark is mandatory brand distribution — always rendered,
+    // never gated by a clinic setting. Item 9: the disable-watermark
+    // option was removed; this is now unconditional for every clinic.
+    const brand  = 'powered by Curakin HealthTech';
+    const brandW = fontReg.widthOfTextAtSize(brand, 7);
+    page.drawText(brand, {
+      x: W - margin - brandW, y,
+      size: 7, font: fontReg, color: rgb(0.80, 0.80, 0.80),
+    });
 
     const pdfBytes = await pdfDoc.save();
     return new NextResponse(Buffer.from(pdfBytes), {
