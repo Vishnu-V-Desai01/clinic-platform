@@ -49,23 +49,26 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
+  /* Step C rollout: base surface tokens promoted from the approved doctor-
+     dashboard preview. Warm neutral (stone/sand) family, hue 75 — applies
+     app-wide from here. */
+  --background: oklch(0.973 0.006 75);
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --card: oklch(0.997 0.003 75);
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.997 0.003 75);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.45 0.11 199);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.93 0.01 75);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.87 0.01 75);
+  --input: oklch(0.87 0.01 75);
   --ring: oklch(0.45 0.11 199);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -73,13 +76,13 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.985 0.004 75);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.45 0.11 199);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.93 0.01 75);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: oklch(0.87 0.01 75);
   --sidebar-ring: oklch(0.45 0.11 199);
 
   /* Status colour language (Step C) — defined once, adopted incrementally.
@@ -98,36 +101,38 @@
   --status-info-text: rgb(3 105 161);
 }
 .dark {
-  --background: oklch(0.145 0 0);
+  /* Step C rollout: cool neutral charcoal (hue 240, no warmth), matching
+     the version approved for the doctor dashboard's dark mode. */
+  --background: oklch(0.16 0.004 240);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.225 0.004 240);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.225 0.004 240);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.78 0.12 199);
   --primary-foreground: oklch(0.145 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  --muted: oklch(0.27 0.006 240);
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(0.32 0.008 240);
+  --input: oklch(0.32 0.008 240);
   --ring: oklch(0.78 0.12 199);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.19 0.004 240);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.78 0.12 199);
   --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.27 0.006 240);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(0.32 0.008 240);
   --sidebar-ring: oklch(0.78 0.12 199);
 
   --status-success-bg: rgb(6 78 59 / 0.3);
@@ -142,57 +147,35 @@
   --status-info-text: rgb(56 189 248);
 }
 
-/* Step C preview scope — SCOPED, not global. Only elements wrapped in
-   .curakin-preview read these tokens; every other page keeps using the
-   root --background/--card/--muted/--border above, completely untouched.
-   This exists specifically so the doctor dashboard can preview the new
-   visual system before it's approved and promoted to :root/.dark.
-
-   Direction: warm neutral (stone/sand) surfaces. Teal (--primary) appears
-   ONLY as an accent — icon chips, active buttons, chart lines — never as
-   a background or card tint.
-
-   --border and --input are ALSO overridden here (not just the --preview-*
-   tokens) so that shadcn's default border-border/border-input utility
-   classes — used by Button outline variants, Input, Badge, etc. — pick up
-   the warm tone automatically anywhere inside this scope, without having
-   to touch every component that uses those utilities. */
+/* Step C — .curakin-preview now mainly carries the EXTRAS beyond the base
+   tokens above (gradient stops, shadow, icon glow), since --background,
+   --card, --muted, --border, --input are promoted to root and apply
+   everywhere already. The --preview-background/card/muted/border aliases
+   are kept so existing component markup (bg-[var(--preview-background)],
+   etc.) keeps working unchanged — they now just point straight at root. */
 .curakin-preview {
-  --preview-background: oklch(0.973 0.006 75);
-  --preview-card: oklch(0.997 0.003 75);
-  --preview-muted: oklch(0.93 0.01 75);
-  --preview-border: oklch(0.87 0.01 75);
+  --preview-background: var(--background);
+  --preview-card: var(--card);
+  --preview-muted: var(--muted);
+  --preview-border: var(--border);
   --preview-card-gradient-from: oklch(0.997 0.003 75);
   --preview-card-gradient-to: oklch(0.95 0.012 75);
   --preview-shadow:
     0 1px 2px 0 rgb(0 0 0 / 0.04),
     0 1px 3px 0 rgb(0 0 0 / 0.03);
   --preview-icon-glow: none;
-
-  --border: var(--preview-border);
-  --input: var(--preview-border);
 }
-
-/* Dark mode gets a distinct, COOL neutral treatment — not a warm variant
-   of light mode. Warm hue + very low lightness reads as muddy brown/red,
-   which is what the first attempt produced. Dark surfaces here use a
-   neutral blue-gray (hue 240, no warmth) matching the family shadcn's own
-   dark tokens already use, with teal reserved purely for the accent: the
-   gradient's cool corner, the icon-chip glow, and the card shadow. */
 .dark .curakin-preview {
-  --preview-background: oklch(0.16 0.004 240);
-  --preview-card: oklch(0.225 0.004 240);
-  --preview-muted: oklch(0.27 0.006 240);
-  --preview-border: oklch(0.32 0.008 240);
+  --preview-background: var(--background);
+  --preview-card: var(--card);
+  --preview-muted: var(--muted);
+  --preview-border: var(--border);
   --preview-card-gradient-from: oklch(0.225 0.004 240);
   --preview-card-gradient-to: oklch(0.25 0.028 199);
   --preview-shadow:
     0 1px 3px 0 rgb(0 0 0 / 0.4),
     0 4px 14px -4px oklch(0.72 0.14 199 / 0.18);
   --preview-icon-glow: 0 0 10px -2px oklch(0.78 0.12 199 / 0.3);
-
-  --border: var(--preview-border);
-  --input: var(--preview-border);
 }
 
 @layer base {
@@ -210,8 +193,8 @@
 @layer components {
   /* Typography scale (Step C) — formalizes font sizes/weights already used
      ad hoc throughout the app (text-2xl font-semibold, text-lg
-     font-semibold, etc.) into named, reusable classes. Defining these here
-     has no effect until a component opts in by using the class name. */
+     font-semibold, etc.) into named, reusable classes. Available app-wide;
+     adopted per-component as each dashboard's turn comes up. */
   .curakin-h1 {
     @apply text-2xl font-semibold tracking-tight text-foreground;
   }
@@ -225,33 +208,31 @@
     @apply text-xs font-medium tracking-wide text-muted-foreground;
   }
 
-  /* Summary/KPI card treatment (Step C) — warm neutral tonal gradient +
-     soft shadow (teal-tinted glow in dark), NO border, NO teal tint on the
-     card surface itself. Teal shows up only via the .curakin-stat-icon
-     chip inside the card. Meant for stat cards only, never for chart
-     containers or list cards. */
+  /* Summary/KPI card treatment (Step C) — tonal gradient + soft shadow, NO
+     border. Meant for stat cards only, never for chart containers or list
+     cards. Requires a .curakin-preview ancestor for the full warm/cool
+     diagonal (falls back to a flat --card fill outside that scope, so it's
+     always safe to apply, just less interesting without the wrapper). */
   .curakin-stat-card {
     background: linear-gradient(
       135deg,
       var(--preview-card-gradient-from, var(--card)) 0%,
       var(--preview-card-gradient-to, var(--card)) 100%
     );
-    box-shadow: var(--preview-shadow);
+    box-shadow: var(--preview-shadow, 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.03));
   }
 
   /* Flat card treatment (Step C) — for chart/list containers that should
      NOT get the gradient (restraint: gradient is for summary numbers
-     only). Flat warm-neutral background + shadow, no border. */
+     only). Flat card background + shadow, no border. */
   .curakin-card-flat {
     background: var(--preview-card, var(--card));
-    box-shadow: var(--preview-shadow);
+    box-shadow: var(--preview-shadow, 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.03));
   }
 
   /* Teal accent icon chip (Step C) — the ONLY place teal appears inside a
-     stat card. Small, quiet, sits beside the label. A soft glow is added
-     automatically in dark mode via --preview-icon-glow (none in light).
-     Amber variant used on the one card that already carries an
-     amber-accent meaning (Outstanding Balance). */
+     stat card. Small, quiet, sits beside the label. Amber variant used for
+     cards that already carry an amber-accent meaning. */
   .curakin-stat-icon {
     @apply flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary;
     box-shadow: var(--preview-icon-glow, none);
@@ -262,13 +243,9 @@
 }
 
 /* Border removal for the two card classes above — deliberately UNLAYERED
-   (outside @layer) so it beats shadcn Card's default `border` utility
-   class regardless of Tailwind's utilities-layer priority. Scoped tightly
-   to .curakin-preview so nothing outside this preview is affected. Applies
-   in BOTH light and dark now — dark mode gets the same borderless,
-   gradient-lifted treatment as light rather than falling back to the old
-   bordered look. */
-.curakin-preview .curakin-stat-card,
-.curakin-preview .curakin-card-flat {
+   so it beats shadcn Card's default `border` utility class regardless of
+   Tailwind's utilities-layer priority. */
+.curakin-stat-card,
+.curakin-card-flat {
   border: none !important;
 }
