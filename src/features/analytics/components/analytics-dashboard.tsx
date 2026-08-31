@@ -20,7 +20,21 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { AlertTriangle, TrendingUp, RefreshCw, Inbox } from 'lucide-react';
+import {
+  AlertTriangle,
+  TrendingUp,
+  RefreshCw,
+  Inbox,
+  Wallet,
+  Receipt,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Users,
+  CalendarClock,
+  XCircle,
+  UserPlus,
+} from 'lucide-react';
 import type { AnomalyMetricName, AnomalyDirection, AnomalySeverity } from '../types';
 import AppointmentEfficiency, {
   type AppointmentEfficiencyData,
@@ -30,11 +44,6 @@ import AppointmentEfficiency, {
 // Types
 // ============================================================================
 
-// metricName/direction/severity are imported from ../types.ts rather than
-// redeclared here — this file previously had its own narrower copy of the
-// metric-name union, which silently drifted out of sync when actions.ts
-// grew two more tracked metrics (Chat 14, Step 1a). types.ts is now the
-// single source of truth; this interface just borrows from it.
 interface Anomaly {
   id: string;
   metricName: AnomalyMetricName;
@@ -133,11 +142,6 @@ const formatCompactINR = (paise: number): string => {
 // Anomaly Banner Component
 // ============================================================================
 
-// Deterministic, zero-cost template strings — one label + one message
-// pattern per metric, no LLM involved. Which direction counts as "good"
-// vs. "bad" is a judgment call baked in here, not derived from the stats
-// themselves (the anomaly engine has no opinion on good/bad — it just
-// flags deviation).
 const METRIC_LABELS: Record<AnomalyMetricName, string> = {
   appointments_total: 'Appointments today',
   appointments_cancelled: 'Cancellations today',
@@ -164,11 +168,6 @@ const TIPS: Partial<Record<TipKey, string>> = {
   appointments_cancelled_low: ' Fewer cancellations than usual.',
 };
 
-// revenue_collected is stored in rupees in daily_metrics/anomaly_alerts
-// (see actions.ts runDailyRollup — no *100 conversion happens for this
-// field, unlike IncomeSummary.revenuePaise elsewhere on this dashboard).
-// Converting to paise here before reusing formatINR keeps this the only
-// place that needs to know that distinction.
 function formatAnomalyValue(metricName: AnomalyMetricName, value: number): string {
   if (metricName === 'revenue_collected') {
     return formatINR(Math.round(value * 100));
@@ -176,9 +175,6 @@ function formatAnomalyValue(metricName: AnomalyMetricName, value: number): strin
   return value.toLocaleString('en-IN');
 }
 
-// Guards against rollingMean === 0 (a metric with a genuinely zero recent
-// average — e.g. a brand-new clinic with no cancellations yet) where a
-// percentage swing is undefined, not just large.
 function computePercentChange(actual: number, mean: number): number | null {
   if (mean === 0) return null;
   return ((actual - mean) / mean) * 100;
@@ -209,32 +205,25 @@ const AnomalyBanner: React.FC<{ anomaly: Anomaly }> = ({ anomaly }) => {
   const isGood = GOOD_DIRECTION[anomaly.metricName] === anomaly.direction;
   const isCritical = anomaly.severity === 'critical';
 
-  // Good news → emerald family. Needs attention → amber family. Severity
-  // (warning vs. critical) still varies intensity within whichever family
-  // applies, so a big positive swing reads as "great day," not confused
-  // with a big negative one.
-  const bannerClass = isGood
+  const bg = isGood
     ? isCritical
-      ? 'bg-emerald-500/20 border border-emerald-400/50 dark:border-emerald-800'
-      : 'bg-emerald-500/10 border border-emerald-200 dark:border-emerald-900'
+      ? 'var(--status-success-bg-strong)'
+      : 'var(--status-success-bg)'
     : isCritical
-      ? 'bg-amber-500/20 border border-amber-400/50 dark:border-amber-800'
-      : 'bg-amber-500/10 border border-amber-200 dark:border-amber-900';
+      ? 'var(--status-warning-bg-strong)'
+      : 'var(--status-warning-bg)';
 
-  const textClass = isGood
-    ? isCritical
-      ? 'text-emerald-800 dark:text-emerald-300'
-      : 'text-emerald-700 dark:text-emerald-400'
-    : isCritical
-      ? 'text-amber-800 dark:text-amber-300'
-      : 'text-amber-700 dark:text-amber-400';
+  const text = isGood ? 'var(--status-success-text)' : 'var(--status-warning-text)';
 
   const IconComponent = isGood ? TrendingUp : AlertTriangle;
 
   return (
-    <div className={`flex items-start gap-3 rounded-lg p-4 ${bannerClass}`}>
-      <IconComponent className={`h-5 w-5 flex-shrink-0 ${textClass}`} />
-      <p className={`text-sm leading-relaxed ${textClass}`}>{message}</p>
+    <div
+      className="flex items-start gap-3 rounded-lg p-4 border"
+      style={{ background: bg, borderColor: text, color: text }}
+    >
+      <IconComponent className="h-5 w-5 flex-shrink-0" style={{ color: text }} />
+      <p className="text-sm leading-relaxed" style={{ color: text }}>{message}</p>
     </div>
   );
 };
@@ -246,7 +235,7 @@ const AnomalyBanner: React.FC<{ anomaly: Anomaly }> = ({ anomaly }) => {
 interface StatCardProps {
   label: string;
   value: string | number;
-  icon?: React.ReactNode;
+  icon: React.ReactNode;
   accentColor?: 'amber' | 'none';
 }
 
@@ -255,14 +244,16 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, icon, accentColor = '
     accentColor === 'amber'
       ? 'border-l-4 border-l-amber-500 pl-4'
       : '';
+  const iconChipClass =
+    accentColor === 'amber' ? 'curakin-stat-icon-amber' : 'curakin-stat-icon';
 
   return (
-    <Card className={`border border-border bg-card rounded-xl shadow-sm p-5 ${accentClass}`}>
-      <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
-      <div className="flex items-end justify-between gap-2">
-        <p className="text-2xl font-semibold text-foreground">{value}</p>
-        {icon && <div className="text-muted-foreground">{icon}</div>}
+    <Card className={`curakin-stat-card rounded-xl p-5 transition-shadow hover:shadow-md ${accentClass}`}>
+      <div className="mb-2 flex items-center gap-2">
+        <div className={iconChipClass}>{icon}</div>
+        <p className="curakin-caption">{label}</p>
       </div>
+      <p className="text-2xl font-semibold text-foreground">{value}</p>
     </Card>
   );
 };
@@ -362,7 +353,6 @@ export default function AnalyticsDashboard({
   const hasActivityData =
     (appointmentsSeries.length > 0 || registrationsSeries.length > 0 || busiestDays.length > 0);
 
-  // Transform data for charts
   const appointmentsChartData = appointmentsSeries.map((p) => ({
     date: formatChartDate(p.date),
     completed: p.completed,
@@ -380,19 +370,18 @@ export default function AnalyticsDashboard({
     registrations: p.count,
   }));
 
-  // Label reflects the actually-selected range instead of being hardcoded.
   const revenueCardLabel =
     dateRange === 'Custom' && customStart && customEnd
       ? `Revenue (${formatChartDate(customStart)} – ${formatChartDate(customEnd)})`
       : `Revenue (${dateRange})`;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="curakin-preview min-h-screen bg-[var(--preview-background)]">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">Analytics Dashboard</h1>
+            <h1 className="curakin-h1">Analytics Dashboard</h1>
             <p className="text-sm text-muted-foreground mt-1">Your practice at a glance</p>
           </div>
           {onRunRollup && (
@@ -472,37 +461,42 @@ export default function AnalyticsDashboard({
 
         {/* Income Section */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold text-foreground mb-4">Income</h2>
+          <h2 className="curakin-h2 mb-4">Income</h2>
 
           {/* Income Stat Cards */}
           <div className="mb-6 grid gap-4 grid-cols-2 sm:grid-cols-4 lg:grid-cols-5">
             <StatCard
               label={revenueCardLabel}
               value={income ? formatINR(income.revenuePaise) : '—'}
+              icon={<Wallet className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Average consultation fee"
               value={income ? formatINR(income.averageConsultationFeePaise) : '—'}
+              icon={<Receipt className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Approved"
               value={income ? formatINR(income.approvedAmountPaise) : '—'}
+              icon={<CheckCircle2 className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Pending Approval"
               value={income ? formatINR(income.pendingApprovalAmountPaise) : '—'}
+              icon={<Clock className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Outstanding Balance"
               value={income ? formatINR(income.outstandingBalancePaise) : '—'}
+              icon={<AlertCircle className="size-4" aria-hidden="true" />}
               accentColor={income && income.outstandingBalancePaise > 0 ? 'amber' : 'none'}
             />
           </div>
 
           {/* Revenue Chart */}
           {hasRevenueData ? (
-            <Card className="border border-border bg-card rounded-xl shadow-sm p-5">
-              <h3 className="text-sm font-semibold text-foreground mb-4">Revenue over time</h3>
+            <Card className="curakin-card-flat rounded-xl p-5">
+              <h3 className="curakin-h3 mb-4">Revenue over time</h3>
               <div className="text-muted-foreground">
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={revenueChartData}>
@@ -539,8 +533,8 @@ export default function AnalyticsDashboard({
               </div>
             </Card>
           ) : (
-            <Card className="border border-border bg-card rounded-xl shadow-sm p-5">
-              <h3 className="text-sm font-semibold text-foreground mb-4">Revenue over time</h3>
+            <Card className="curakin-card-flat rounded-xl p-5">
+              <h3 className="curakin-h3 mb-4">Revenue over time</h3>
               <EmptyState />
             </Card>
           )}
@@ -548,17 +542,19 @@ export default function AnalyticsDashboard({
 
         {/* Activity Section */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold text-foreground mb-4">Activity</h2>
+          <h2 className="curakin-h2 mb-4">Activity</h2>
 
           {/* Activity Stat Cards */}
           <div className="mb-6 grid gap-4 grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Patients Seen"
               value={activity ? activity.patientsSeen : '—'}
+              icon={<Users className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Appointments"
               value={activity ? activity.appointmentsTotal : '—'}
+              icon={<CalendarClock className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="Cancellation / No-Show Rate"
@@ -567,10 +563,12 @@ export default function AnalyticsDashboard({
                   ? `${Math.round(activity.cancellationRate * 100)}%`
                   : '—'
               }
+              icon={<XCircle className="size-4" aria-hidden="true" />}
             />
             <StatCard
               label="New Registrations"
               value={activity ? activity.newRegistrations : '—'}
+              icon={<UserPlus className="size-4" aria-hidden="true" />}
             />
           </div>
 
@@ -578,8 +576,8 @@ export default function AnalyticsDashboard({
           {hasActivityData ? (
             <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
               {/* Appointments Chart */}
-              <Card className="border border-border bg-card rounded-xl shadow-sm p-5 lg:col-span-1">
-                <h3 className="text-sm font-semibold text-foreground mb-4">Appointments over time</h3>
+              <Card className="curakin-card-flat rounded-xl p-5 lg:col-span-1">
+                <h3 className="curakin-h3 mb-4">Appointments over time</h3>
                 {appointmentsChartData.length > 0 ? (
                   <div className="text-muted-foreground">
                     <ResponsiveContainer width="100%" height={250}>
@@ -620,8 +618,8 @@ export default function AnalyticsDashboard({
               </Card>
 
               {/* Registrations Chart */}
-              <Card className="border border-border bg-card rounded-xl shadow-sm p-5 lg:col-span-1">
-                <h3 className="text-sm font-semibold text-foreground mb-4">
+              <Card className="curakin-card-flat rounded-xl p-5 lg:col-span-1">
+                <h3 className="curakin-h3 mb-4">
                   New registrations over time
                 </h3>
                 {registrationsChartData.length > 0 ? (
@@ -661,8 +659,8 @@ export default function AnalyticsDashboard({
               </Card>
 
               {/* Busiest Days Chart */}
-              <Card className="border border-border bg-card rounded-xl shadow-sm p-5 lg:col-span-1">
-                <h3 className="text-sm font-semibold text-foreground mb-4">Busiest days</h3>
+              <Card className="curakin-card-flat rounded-xl p-5 lg:col-span-1">
+                <h3 className="curakin-h3 mb-4">Busiest days</h3>
                 {busiestDays.length > 0 ? (
                   <div className="text-muted-foreground">
                     <ResponsiveContainer width="100%" height={250}>
@@ -696,7 +694,7 @@ export default function AnalyticsDashboard({
           ) : (
             <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
-                <Card key={i} className="border border-border bg-card rounded-xl shadow-sm p-5">
+                <Card key={i} className="curakin-card-flat rounded-xl p-5">
                   <EmptyState />
                 </Card>
               ))}

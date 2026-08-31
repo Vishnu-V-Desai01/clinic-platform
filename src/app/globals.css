@@ -81,6 +81,21 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.45 0.11 199);
+
+  /* Status colour language (Step C) — defined once, adopted incrementally.
+     Values mirror the exact Tailwind emerald/amber/sky classes already used
+     ad hoc throughout the app, so wiring an existing component over to
+     these tokens is a zero-visual-diff refactor, not a redesign. */
+  --status-success-bg: rgb(16 185 129 / 0.15);
+  --status-success-bg-strong: rgb(16 185 129 / 0.2);
+  --status-success-text: rgb(4 120 87);
+  --status-warning-bg: rgb(245 158 11 / 0.15);
+  --status-warning-bg-strong: rgb(245 158 11 / 0.2);
+  --status-warning-text: rgb(180 83 9);
+  --status-danger-bg: color-mix(in oklch, var(--destructive) 15%, transparent);
+  --status-danger-text: var(--destructive);
+  --status-info-bg: rgb(14 165 233 / 0.15);
+  --status-info-text: rgb(3 105 161);
 }
 .dark {
   --background: oklch(0.145 0 0);
@@ -114,6 +129,70 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.78 0.12 199);
+
+  --status-success-bg: rgb(6 78 59 / 0.3);
+  --status-success-bg-strong: rgb(6 78 59 / 0.45);
+  --status-success-text: rgb(52 211 153);
+  --status-warning-bg: rgb(120 53 15 / 0.3);
+  --status-warning-bg-strong: rgb(120 53 15 / 0.45);
+  --status-warning-text: rgb(251 191 36);
+  --status-danger-bg: color-mix(in oklch, var(--destructive) 15%, transparent);
+  --status-danger-text: var(--destructive);
+  --status-info-bg: rgb(12 74 110 / 0.3);
+  --status-info-text: rgb(56 189 248);
+}
+
+/* Step C preview scope — SCOPED, not global. Only elements wrapped in
+   .curakin-preview read these tokens; every other page keeps using the
+   root --background/--card/--muted/--border above, completely untouched.
+   This exists specifically so the doctor dashboard can preview the new
+   visual system before it's approved and promoted to :root/.dark.
+
+   Direction: warm neutral (stone/sand) surfaces. Teal (--primary) appears
+   ONLY as an accent — icon chips, active buttons, chart lines — never as
+   a background or card tint.
+
+   --border and --input are ALSO overridden here (not just the --preview-*
+   tokens) so that shadcn's default border-border/border-input utility
+   classes — used by Button outline variants, Input, Badge, etc. — pick up
+   the warm tone automatically anywhere inside this scope, without having
+   to touch every component that uses those utilities. */
+.curakin-preview {
+  --preview-background: oklch(0.973 0.006 75);
+  --preview-card: oklch(0.997 0.003 75);
+  --preview-muted: oklch(0.93 0.01 75);
+  --preview-border: oklch(0.87 0.01 75);
+  --preview-card-gradient-from: oklch(0.997 0.003 75);
+  --preview-card-gradient-to: oklch(0.95 0.012 75);
+  --preview-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.04),
+    0 1px 3px 0 rgb(0 0 0 / 0.03);
+  --preview-icon-glow: none;
+
+  --border: var(--preview-border);
+  --input: var(--preview-border);
+}
+
+/* Dark mode gets a distinct, COOL neutral treatment — not a warm variant
+   of light mode. Warm hue + very low lightness reads as muddy brown/red,
+   which is what the first attempt produced. Dark surfaces here use a
+   neutral blue-gray (hue 240, no warmth) matching the family shadcn's own
+   dark tokens already use, with teal reserved purely for the accent: the
+   gradient's cool corner, the icon-chip glow, and the card shadow. */
+.dark .curakin-preview {
+  --preview-background: oklch(0.16 0.004 240);
+  --preview-card: oklch(0.225 0.004 240);
+  --preview-muted: oklch(0.27 0.006 240);
+  --preview-border: oklch(0.32 0.008 240);
+  --preview-card-gradient-from: oklch(0.225 0.004 240);
+  --preview-card-gradient-to: oklch(0.25 0.028 199);
+  --preview-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.4),
+    0 4px 14px -4px oklch(0.72 0.14 199 / 0.18);
+  --preview-icon-glow: 0 0 10px -2px oklch(0.78 0.12 199 / 0.3);
+
+  --border: var(--preview-border);
+  --input: var(--preview-border);
 }
 
 @layer base {
@@ -126,4 +205,70 @@
   html {
     @apply font-sans;
   }
+}
+
+@layer components {
+  /* Typography scale (Step C) — formalizes font sizes/weights already used
+     ad hoc throughout the app (text-2xl font-semibold, text-lg
+     font-semibold, etc.) into named, reusable classes. Defining these here
+     has no effect until a component opts in by using the class name. */
+  .curakin-h1 {
+    @apply text-2xl font-semibold tracking-tight text-foreground;
+  }
+  .curakin-h2 {
+    @apply text-lg font-semibold text-foreground;
+  }
+  .curakin-h3 {
+    @apply text-sm font-semibold text-foreground;
+  }
+  .curakin-caption {
+    @apply text-xs font-medium tracking-wide text-muted-foreground;
+  }
+
+  /* Summary/KPI card treatment (Step C) — warm neutral tonal gradient +
+     soft shadow (teal-tinted glow in dark), NO border, NO teal tint on the
+     card surface itself. Teal shows up only via the .curakin-stat-icon
+     chip inside the card. Meant for stat cards only, never for chart
+     containers or list cards. */
+  .curakin-stat-card {
+    background: linear-gradient(
+      135deg,
+      var(--preview-card-gradient-from, var(--card)) 0%,
+      var(--preview-card-gradient-to, var(--card)) 100%
+    );
+    box-shadow: var(--preview-shadow);
+  }
+
+  /* Flat card treatment (Step C) — for chart/list containers that should
+     NOT get the gradient (restraint: gradient is for summary numbers
+     only). Flat warm-neutral background + shadow, no border. */
+  .curakin-card-flat {
+    background: var(--preview-card, var(--card));
+    box-shadow: var(--preview-shadow);
+  }
+
+  /* Teal accent icon chip (Step C) — the ONLY place teal appears inside a
+     stat card. Small, quiet, sits beside the label. A soft glow is added
+     automatically in dark mode via --preview-icon-glow (none in light).
+     Amber variant used on the one card that already carries an
+     amber-accent meaning (Outstanding Balance). */
+  .curakin-stat-icon {
+    @apply flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary;
+    box-shadow: var(--preview-icon-glow, none);
+  }
+  .curakin-stat-icon-amber {
+    @apply flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400;
+  }
+}
+
+/* Border removal for the two card classes above — deliberately UNLAYERED
+   (outside @layer) so it beats shadcn Card's default `border` utility
+   class regardless of Tailwind's utilities-layer priority. Scoped tightly
+   to .curakin-preview so nothing outside this preview is affected. Applies
+   in BOTH light and dark now — dark mode gets the same borderless,
+   gradient-lifted treatment as light rather than falling back to the old
+   bordered look. */
+.curakin-preview .curakin-stat-card,
+.curakin-preview .curakin-card-flat {
+  border: none !important;
 }

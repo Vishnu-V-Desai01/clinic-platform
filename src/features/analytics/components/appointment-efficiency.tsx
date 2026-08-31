@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Inbox } from 'lucide-react';
+import { Inbox, CalendarClock, Repeat } from 'lucide-react';
 
 export interface AppointmentEfficiencyData {
   totalAppointments: number;
@@ -26,12 +26,6 @@ export interface AppointmentEfficiencyData {
   busiestHours: Array<{ hour: number; label: string; count: number }>;
 }
 
-// data is genuinely optional (undefined while loading) — there is
-// deliberately NO hardcoded fallback here. A previous version of this
-// component defaulted to fake demo numbers when data was falsy, which
-// would have silently shown made-up figures on first render and on any
-// real period with zero appointments. Undefined and "zero appointments"
-// are rendered as distinct, honest states below instead.
 export interface AppointmentEfficiencyProps {
   data?: AppointmentEfficiencyData;
 }
@@ -48,13 +42,18 @@ const StatCard = ({
   label,
   value,
   subtext,
+  icon,
 }: {
   label: string;
   value: string;
   subtext?: string;
+  icon: React.ReactNode;
 }) => (
-  <Card className="border border-border bg-card rounded-xl shadow-sm p-5">
-    <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
+  <Card className="curakin-stat-card rounded-xl p-5 transition-shadow hover:shadow-md">
+    <div className="mb-2 flex items-center gap-2">
+      <div className="curakin-stat-icon">{icon}</div>
+      <p className="curakin-caption">{label}</p>
+    </div>
     <p className="text-2xl font-semibold text-foreground">{value}</p>
     {subtext && <p className="text-xs text-muted-foreground mt-1">{subtext}</p>}
   </Card>
@@ -105,9 +104,6 @@ const SplitBar = ({
   );
 };
 
-// Matches the ChartTooltip/CurrencyTooltip pattern already used elsewhere
-// in analytics-dashboard.tsx, rather than introducing a third, visually
-// inconsistent tooltip style via recharts' contentStyle/formatter props.
 const EfficiencyChartTooltip = (props: any) => {
   const { active, payload, label } = props;
   if (active && payload && payload.length) {
@@ -127,7 +123,7 @@ const EfficiencyChartTooltip = (props: any) => {
 export default function AppointmentEfficiency({ data }: AppointmentEfficiencyProps) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Appointment Efficiency</h2>
+      <h2 className="curakin-h2">Appointment Efficiency</h2>
 
       {/* Stats with Split Bars */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -139,6 +135,7 @@ export default function AppointmentEfficiency({ data }: AppointmentEfficiencyPro
             subtext={
               data ? `${data.sameDayBookings} of ${data.totalAppointments} appointments` : undefined
             }
+            icon={<CalendarClock className="size-4" aria-hidden="true" />}
           />
           {data && data.totalAppointments > 0 && (
             <SplitBar
@@ -159,6 +156,7 @@ export default function AppointmentEfficiency({ data }: AppointmentEfficiencyPro
                 ? `${data.repeatPatientAppointments} of ${data.totalAppointments} appointments`
                 : undefined
             }
+            icon={<Repeat className="size-4" aria-hidden="true" />}
           />
           {data && data.totalAppointments > 0 && (
             <SplitBar
@@ -173,8 +171,8 @@ export default function AppointmentEfficiency({ data }: AppointmentEfficiencyPro
       {/* Cancellation Reasons & Busiest Time */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Cancellation Reasons */}
-        <Card className="border border-border bg-card rounded-xl shadow-sm p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Cancellation Reasons</h3>
+        <Card className="curakin-card-flat rounded-xl p-5">
+          <h3 className="curakin-h3 mb-4">Cancellation Reasons</h3>
           {!data || data.cancellationReasons.length === 0 ? (
             <EmptyState />
           ) : (
@@ -192,8 +190,8 @@ export default function AppointmentEfficiency({ data }: AppointmentEfficiencyPro
         </Card>
 
         {/* Busiest Time of Day */}
-        <Card className="border border-border bg-card rounded-xl shadow-sm p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Busiest Time of Day</h3>
+        <Card className="curakin-card-flat rounded-xl p-5">
+          <h3 className="curakin-h3 mb-4">Busiest Time of Day</h3>
           {!data || data.busiestHours.length === 0 ? (
             <EmptyState />
           ) : (

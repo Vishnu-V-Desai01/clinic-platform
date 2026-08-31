@@ -47,7 +47,7 @@ function toBannerAnomaly(record: AnomalyAlertRecord) {
 
 function AnalyticsDashboardSkeleton() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="curakin-preview min-h-screen bg-[var(--preview-background)]">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8 flex items-start justify-between gap-4">
@@ -130,7 +130,7 @@ export default function AnalyticsDashboardContainer() {
   getAppointmentEfficiency(filter),
 ])
 
-    // Summary cards are the core of the page â€” a failure here is fatal.
+    // Summary cards are the core of the page — a failure here is fatal.
     if (!dataRes.success) {
       setError(dataRes.error)
       setResult(null)
@@ -139,7 +139,7 @@ export default function AnalyticsDashboardContainer() {
     }
     setResult(dataRes.data)
 
-    // Charts, alerts, and efficiency all degrade gracefully â€” the cards
+    // Charts, alerts, and efficiency all degrade gracefully — the cards
     // still work without them.
     if (seriesRes.success) {
       setSeries(seriesRes.data)
@@ -165,7 +165,7 @@ export default function AnalyticsDashboardContainer() {
     setLoading(false)
   }, [])
 
-  // Initial load only â€” subsequent loads are triggered by handleRangeChange.
+  // Initial load only — subsequent loads are triggered by handleRangeChange.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     load(currentFilter)
@@ -186,7 +186,7 @@ export default function AnalyticsDashboardContainer() {
       const res = await runDailyRollup()
       if (res.success) {
         setRollupMessage(
-          `Rolled up ${res.data.date} â€” ${res.data.alertsTriggered} alert(s) triggered.`,
+          `Rolled up ${res.data.date} — ${res.data.alertsTriggered} alert(s) triggered.`,
         )
         await load(currentFilter)
       } else {
