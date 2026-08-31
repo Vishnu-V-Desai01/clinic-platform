@@ -1,7 +1,7 @@
 // src/features/post-visit/components/PrescriptionsCard.tsx
 //
 // Card 1 of 5 in the Post-Visit wizard.
-// Always controlled — wizard shell owns all state.
+// Always controlled â€” wizard shell owns all state.
 // Soft-deletes via isDeleted:true so the server can:
 //   - call deleteMedicine() on removed care-plan rows (carePlanMedicineId set)
 //   - skip newly-added rows that the doctor removed (no carePlanMedicineId)
@@ -16,27 +16,32 @@
 //   - Either path sets drugId on the line, which the pharmacy queue later
 //     uses to match reliably instead of case-insensitive name matching.
 //   - drugId is set ONLY by an explicit selection (dropdown click or picker
-//     click) and is cleared by any manual keystroke in the name field —
+//     click) and is cleared by any manual keystroke in the name field â€”
 //     this keeps drugId from ever silently pointing at a name that no
 //     longer matches what's displayed.
 //   - Free text remains fully supported: a medicine not in the catalogue,
 //     or a handwritten-prescription case, just leaves drugId unset. The
 //     pharmacy queue shows these as "Not in catalogue," which is expected.
-//   - The picker deliberately does NOT show stock levels — it queries the
+//   - The picker deliberately does NOT show stock levels â€” it queries the
 //     catalogue only (pharmacy_drugs, doctor-visible per the Chat A RLS
 //     split), never pharmacy_inventory, so a doctor without pharmacy_access
 //     never sees stock data through this component.
 //
 // Item 7 addition: a second autocomplete source layered onto the SAME
-// dropdown as the catalogue suggestions — distinct medicine names this
+// dropdown as the catalogue suggestions â€” distinct medicine names this
 // clinic has prescribed before, even ones never matched to a catalogue
 // drug. Fetched via a debounced server action (searchPastMedicineNames),
 // since past-prescription names live in a different table the catalogue
 // (already loaded client-side in full) doesn't cover. Catalogue matches
 // are listed first (richer detail available), then past-name matches not
 // already covered by a catalogue result, case-insensitively de-duplicated.
-// A past-name suggestion carries no drugId when selected — it's exactly
+// A past-name suggestion carries no drugId when selected â€” it's exactly
 // equivalent to typing that text manually, just faster.
+//
+// Step B addition: a "Searching previous prescriptionsâ€¦" row now shows in
+// the dropdown while the debounced past-name search is in flight, so the
+// user gets a visible pending state instead of a silent gap between typing
+// and results appearing.
 
 'use client'
 
@@ -105,10 +110,10 @@ function drugDisplayLabel(drug: PharmacyDrugRow): string {
 function drugSubLabel(drug: PharmacyDrugRow): string {
   const bits: string[] = [PHARMACY_DRUG_FORM_LABELS[drug.form]]
   if (drug.generic_name) bits.push(drug.generic_name)
-  return bits.join(' · ')
+  return bits.join(' Â· ')
 }
 
-// Collapses runs of internal whitespace and trims — applied on save so the
+// Collapses runs of internal whitespace and trims â€” applied on save so the
 // stored name is clean without ever changing its casing (a brand name like
 // "Crocin" shouldn't be lowercased just because search comparisons are
 // case-insensitive).
@@ -123,15 +128,16 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
   // Catalogue, fetched once. A doctor with no pharmacy_access still gets
   // this list (catalogue read stays doctor-visible per Chat A's RLS split);
   // an empty result (module disabled, or no drugs yet) just means the
-  // autocomplete/picker silently offer nothing — free text still works.
+  // autocomplete/picker silently offer nothing â€” free text still works.
   const [drugs, setDrugs]             = useState<PharmacyDrugRow[]>([])
   const [drugsLoaded, setDrugsLoaded] = useState(false)
 
   // Item 7: past-prescription-name suggestions, debounced against the
-  // server. Kept separate from the catalogue's instant in-memory filter —
+  // server. Kept separate from the catalogue's instant in-memory filter â€”
   // the catalogue has no network cost so it stays snappy; this one does,
   // so it gets its own debounce and minimum-length gate.
   const [pastNames, setPastNames]           = useState<string[]>([])
+  const [pastNamesLoading, setPastNamesLoading] = useState(false)
   const pastNamesDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pastNamesRequestId = useRef(0)
 
@@ -161,14 +167,17 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
 
     if (query.length < PAST_NAME_MIN_QUERY_LENGTH) {
       setPastNames([])
+      setPastNamesLoading(false)
       return
     }
 
     pastNamesDebounce.current = setTimeout(() => {
       const thisRequestId = ++pastNamesRequestId.current
+      setPastNamesLoading(true)
       searchPastMedicineNames(query).then((names) => {
         if (thisRequestId !== pastNamesRequestId.current) return // stale response, ignore
         setPastNames(names)
+        setPastNamesLoading(false)
       })
     }, PAST_NAME_SEARCH_DEBOUNCE_MS)
 
@@ -232,7 +241,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     setShowForm(false)
   }
 
-  // Manual typing always invalidates any prior catalogue selection — drugId
+  // Manual typing always invalidates any prior catalogue selection â€” drugId
   // must only ever reflect an explicit pick, never a guess.
   const handleNameChange = (text: string) => {
     setForm((f) => ({ ...f, medicineName: text, drugId: undefined }))
@@ -245,7 +254,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
   }
 
   // Selecting a past-prescription-name suggestion is exactly equivalent to
-  // typing that text manually — no drugId, since it was never matched to
+  // typing that text manually â€” no drugId, since it was never matched to
   // a catalogue row (if it had been, it would show as a catalogue
   // suggestion instead and this path wouldn't apply).
   const selectPastName = (name: string) => {
@@ -270,7 +279,8 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     if (form.medicineName.trim()) setShowSuggestions(true)
   }
 
-  const hasAnySuggestions = catalogueSuggestions.length > 0 || pastNameSuggestions.length > 0
+  const hasAnySuggestions =
+    catalogueSuggestions.length > 0 || pastNameSuggestions.length > 0 || pastNamesLoading
 
   return (
     <div className="flex flex-col gap-6">
@@ -278,7 +288,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
       <div>
         <h2 className="text-lg font-semibold text-foreground">Prescriptions</h2>
         <p className="text-sm text-muted-foreground">
-          Pre-filled from care plan · editable · changes sync back to care plan on save
+          Pre-filled from care plan Â· editable Â· changes sync back to care plan on save
         </p>
       </div>
 
@@ -407,6 +417,17 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                           ))}
                         </>
                       )}
+                      {pastNamesLoading && (
+                        <>
+                          {(catalogueSuggestions.length > 0 || pastNameSuggestions.length > 0) && (
+                            <div className="border-t border-border" />
+                          )}
+                          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                            <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
+                            Searching previous prescriptionsâ€¦
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -426,7 +447,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">Matched to pharmacy catalogue</p>
               )}
               {!drugsLoaded && (
-                <p className="text-xs text-muted-foreground">Loading catalogue…</p>
+                <p className="text-xs text-muted-foreground">Loading catalogueâ€¦</p>
               )}
             </div>
 
@@ -507,7 +528,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
             <Input
               value={pickerSearch}
               onChange={(e) => setPickerSearch(e.target.value)}
-              placeholder="Search medicines…"
+              placeholder="Search medicinesâ€¦"
               className="pl-9"
               autoFocus
             />
@@ -515,7 +536,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
 
           <div className="max-h-80 overflow-y-auto rounded-md border border-border">
             {!drugsLoaded ? (
-              <p className="p-4 text-center text-sm text-muted-foreground">Loading…</p>
+              <p className="p-4 text-center text-sm text-muted-foreground">Loadingâ€¦</p>
             ) : pickerResults.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
                 {drugs.length === 0 ? 'No medicines in the catalogue yet.' : 'No medicines match your search.'}
