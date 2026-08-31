@@ -8,6 +8,7 @@ import type { PatientFormData } from "./schema"
 import { calculateAge } from "./types"
 import type { PatientListItem, PatientRecord } from "./types"
 import { createRegistrationMessage } from "@/features/messaging/actions"
+import { grantConsent } from "@/features/consent/actions"
 
 type Result<T> =
   | { success: true; data: T }
@@ -111,6 +112,19 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
       return { success: false, error: message }
     }
 
+    // DPDP Act 2023 Section 6: data processing requires informed consent
+    // captured at collection. patient-form.tsx requires this checkbox in
+    // create mode and disables submit until it's checked, but that's a
+    // UX guard only — the server independently re-verifies rather than
+    // trusting the client, same principle as every other check in this
+    // file.
+    if (!parsed.data.consentGiven) {
+      return {
+        success: false,
+        error: "Please confirm the patient has consented before registering.",
+      }
+    }
+
     // clinic_id is genuinely nullable on Profile now (patients have none
     // by design), but requireRole("doctor", "staff") means role is never
     // 'patient' here, so a real clinic_id should always be present. This
@@ -148,13 +162,49 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
 
     if (error) throw error
 
-    // Queue WhatsApp registration message after response is sent — truly non-blocking
+    // Grant baseline consent — 5 purposes bundled at intake.
+    // Patient can revoke any of these independently later via the portal.
+    //
+    // Consent is granted FIRST and awaited before createRegistrationMessage
+    // runs, so the registration message's own hasActiveConsent check (in
+    // messaging/actions.ts) always finds a row to check against rather than
+    // racing an empty patient_consents table.
+    //
+    // The sixth purpose (record_sharing) is deferred to Phase 2 and not
+    // granted here — it's opt-in only, reserved for future cross-clinic
+    // features that don't exist yet.
     const patientId = (data as PatientRecord).id
     after(async () => {
       try {
+        // Five purposes, all auto-granted at registration
+        const purposes = [
+          'data_processing',
+          'whatsapp_notifications',
+          'appointment_reminders',
+          'medication_reminders',
+          'care_plan_access',
+        ] as const
+
+        for (const purpose of purposes) {
+          const result = await grantConsent({
+            patient_id: patientId,
+            purpose,
+          })
+          if (!result.success) {
+            console.error(
+              `[createPatient] Failed to grant ${purpose} consent:`,
+              result.error,
+            )
+          }
+        }
+      } catch (err) {
+        console.error('[createPatient] Consent grant failed:', err)
+      }
+
+      try {
         await createRegistrationMessage({ patientId })
       } catch (err) {
-        console.error("[createPatient] Registration message failed:", err)
+        console.error('[createPatient] Registration message failed:', err)
       }
     })
 

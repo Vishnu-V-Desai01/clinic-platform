@@ -51,7 +51,14 @@ export interface PatientRecord {
 /* --------------------------- Form values (camelCase) --------------------- */
 // What the create/edit form works with. `mrn` is display-only: the database
 // generates it on create and it never changes.
-
+//
+// `consentGiven`: only meaningful in "create" mode — captures that the
+// patient (or their guardian) was informed and consented to data
+// processing and WhatsApp communication at the point of registration, per
+// DPDP Act 2023 Section 6. patient-form.tsx only renders the checkbox and
+// enforces it in create mode; actions.ts's updatePatient ignores this
+// field entirely, since consent status for an existing patient is managed
+// via the patient portal's granular consent toggles, not the edit form.
 export interface PatientFormValues {
   firstName: string
   lastName: string
@@ -74,6 +81,7 @@ export interface PatientFormValues {
   allergies: string[]
   conditions: string[]
   notes: string
+  consentGiven: boolean
 }
 
 /* ------------------------- List row (display shape) ---------------------- */

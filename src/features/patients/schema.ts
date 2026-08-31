@@ -147,6 +147,14 @@ export const patientFormSchema = z.object({
   allergies: tagList,
   conditions: tagList,
   notes: optionalText(5000),
+
+  // --- DPDP consent (create mode only) ---
+  // Shape-only here: a plain boolean, defaulting false if omitted. Whether
+  // it's actually REQUIRED to be true depends on create vs. edit mode,
+  // which — same as assignedDoctorId above — the schema can't know.
+  // createPatient() in actions.ts rejects the submission if this is false;
+  // updatePatient() ignores the field entirely.
+  consentGiven: z.boolean().default(false),
 })
 
 /** What the form sends in (before cleaning). */

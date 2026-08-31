@@ -5,7 +5,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft, Calendar, Check, ChevronRight, FileText,
-  Heart, Languages, Lock, Mail, MapPin, Phone, User, X,
+  Heart, Languages, Lock, Mail, MapPin, Phone, ShieldCheck, User, X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -48,6 +48,7 @@ const EMPTY_VALUES: PatientFormValues = {
   languagePreference: "en",
   emergencyName: "", emergencyRelationship: "", emergencyPhone: "",
   allergies: [], conditions: [], notes: "",
+  consentGiven: false,
 }
 
 function toFormValues(p: PatientRecord): PatientFormValues {
@@ -73,6 +74,11 @@ function toFormValues(p: PatientRecord): PatientFormValues {
     allergies:             p.allergies,
     conditions:            p.conditions,
     notes:                 p.notes ?? "",
+    // Edit mode never re-asks for consent — an existing patient's consent
+    // status is managed via their portal's granular toggle UI, not this
+    // form. Set true here purely so this field can't accidentally block
+    // updatePatient (which ignores it entirely regardless).
+    consentGiven:          true,
   }
 }
 
@@ -204,6 +210,8 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
       router.refresh()
     })
   }
+
+  const canSubmit = isEdit || values.consentGiven
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -491,6 +499,36 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
                 </div>
               </CardContent>
             </Card>
+
+            {/* Consent (create mode only) */}
+            {!isEdit && (
+              <Card className="rounded-xl border shadow-sm">
+                <CardHeader className="block">
+                  <SectionHeader icon={ShieldCheck} title="Consent"
+                    subtitle="Required under DPDP Act 2023" />
+                </CardHeader>
+                <CardContent>
+                  <label
+                    htmlFor="consentGiven"
+                    className="flex cursor-pointer items-start gap-3 rounded-md border border-input p-4 hover:bg-muted/40"
+                  >
+                    <input
+                      id="consentGiven"
+                      type="checkbox"
+                      checked={values.consentGiven}
+                      onChange={(e) => set("consentGiven", e.target.checked)}
+                      className="mt-0.5 size-4 shrink-0 accent-sky-500"
+                    />
+                    <span className="text-sm text-foreground">
+                      The patient (or their guardian) has been informed and consents to
+                      the clinic processing their health data for clinical care, and to
+                      receiving appointment, receipt, and other clinic communications
+                      via WhatsApp. This can be changed anytime from the patient portal.
+                    </span>
+                  </label>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
 
@@ -500,7 +538,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
             onClick={() => router.back()}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isPending}
+          <Button type="submit" disabled={isPending || !canSubmit}
             className="gap-2 bg-sky-500 text-white hover:bg-sky-600">
             <Check className="size-4" />
             {isPending

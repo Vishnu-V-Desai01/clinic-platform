@@ -7,6 +7,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/profile";
 import { generateAndStorePaymentDocuments } from "@/features/payments/document-storage";
 import { INCLUDED_MESSAGE_LIMIT, OVERAGE_RATE_PAISE } from "@/lib/config/messaging";
+import { hasActiveConsent } from "@/features/consent/actions";
 import {
   createRegistrationMessageInputSchema,
   createAppointmentMessageInputSchema,
@@ -51,6 +52,15 @@ function formatPhoneWithCountryCode(phone: string, countryCode: string): string 
   const code = COUNTRY_CODE_MAP[countryCode] || '91';
   return phone.startsWith(code) ? phone : `${code}${phone}`;
 }
+
+// DPDP consent gate: shared error text used at every create*Message and
+// sendMessage call site below, so the two enforcement points (creation
+// and send) can never drift apart in wording. A missing/revoked
+// whatsapp_notifications consent blocks the message the exact same way
+// whether it's caught when the message is first queued or later when
+// it's about to actually go out.
+const CONSENT_DENIED_ERROR =
+  "This patient has not consented to WhatsApp notifications.";
 
 // ── Message visibility scoping (Issue 3, re-scoped) ────────────────
 //
@@ -169,6 +179,14 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
   const profile = await requireRole("doctor", "staff");
   const { patientId } = createRegistrationMessageInputSchema.parse(input);
   const supabase = createServerSupabaseClient();
+
+  // DPDP gate: block at creation time so a message never sits queued for
+  // a patient who hasn't consented (or whose consent was revoked before
+  // this ever ran). See CONSENT_DENIED_ERROR comment above.
+  const consented = await hasActiveConsent(patientId, "whatsapp_notifications");
+  if (!consented) {
+    return { success: false, error: CONSENT_DENIED_ERROR };
+  }
 
   const { data: existingMessage } = await supabase
     .from("message_queue")
@@ -291,6 +309,13 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
 
   if (appointmentError || !appointment) {
     return { success: false, error: "Appointment not found" };
+  }
+
+  // DPDP gate: block at creation time. Checked after fetching the
+  // appointment (need patient_id from it) but before any further work.
+  const consented = await hasActiveConsent(appointment.patient_id, "whatsapp_notifications");
+  if (!consented) {
+    return { success: false, error: CONSENT_DENIED_ERROR };
   }
 
   if (appointment.status !== "scheduled") {
@@ -451,6 +476,12 @@ export async function createReceiptMessage(input: CreateReceiptMessageInput) {
 
   if (paymentError || !payment) {
     return { success: false, error: "Payment not found" };
+  }
+
+  // DPDP gate: block at creation time.
+  const consented = await hasActiveConsent(payment.patient_id, "whatsapp_notifications");
+  if (!consented) {
+    return { success: false, error: CONSENT_DENIED_ERROR };
   }
 
   if (payment.approval_status !== "approved") {
@@ -624,6 +655,34 @@ export async function sendMessage(input: SendMessageInput) {
     return { success: false, error: "Message not found" };
   }
 
+  // DPDP gate: re-checked here even though create*Message already checked
+  // at queue time — this catches a consent revocation that happens AFTER
+  // a message was queued but BEFORE it was sent (e.g. an appointment
+  // reminder queued days ahead of the visit, revoked the next morning).
+  // A message stuck in "pending" with consent since revoked is marked
+  // failed rather than silently sent.
+  const consented = await hasActiveConsent(message.patient_id, "whatsapp_notifications");
+  if (!consented) {
+    await supabase
+      .from("message_queue")
+      .update({
+        status: "failed",
+        error_message: CONSENT_DENIED_ERROR,
+      })
+      .eq("id", messageId);
+
+    await supabase.from("message_delivery_logs").insert({
+      clinic_id: message.clinic_id,
+      message_queue_id: messageId,
+      action: "failed",
+      performed_by: profile.id,
+      details: { errorMessage: CONSENT_DENIED_ERROR },
+    });
+
+    revalidatePath("/dashboard/messages");
+    return { success: false, error: CONSENT_DENIED_ERROR };
+  }
+
   if (message.status !== "pending") {
     return { success: false, error: `Message is already ${message.status}, cannot send again` };
   }
@@ -708,11 +767,10 @@ export async function sendAllMessages(input: SendAllMessagesInput) {
   const errors: { messageId: string; error: string }[] = [];
 
   for (const messageId of messageIds) {
-    // sendMessage independently re-checks permission per id (see ownership
-    // check inside it) — this loop does NOT trust that the caller's list
-    // was already filtered to permitted messages. A doctor's client could
-    // in principle submit ids for messages outside their scope; each one
-    // is rejected individually here rather than assumed valid.
+    // sendMessage independently re-checks permission AND consent per id
+    // (see the ownership check and DPDP gate inside it) — this loop does
+    // NOT trust that the caller's list was already filtered to permitted
+    // or consented messages.
     const result = await sendMessage({ messageId });
     if (result.success) {
       succeeded++;
@@ -1061,6 +1119,12 @@ export async function createMedicineReceiptMessage(input: CreateReceiptMessageIn
     return { success: false, error: "Payment not found" };
   }
 
+  // DPDP gate: block at creation time.
+  const consented = await hasActiveConsent(payment.patient_id, "whatsapp_notifications");
+  if (!consented) {
+    return { success: false, error: CONSENT_DENIED_ERROR };
+  }
+
   if (payment.payment_source !== "medicine") {
     return { success: false, error: "This is not a medicine payment" };
   }
@@ -1200,6 +1264,12 @@ export async function createPrescriptionMessage(input: { encounterId: string }) 
 
   if (encounterError || !encounter) {
     return { success: false, error: "Encounter not found" };
+  }
+
+  // DPDP gate: block at creation time.
+  const consented = await hasActiveConsent(encounter.patient_id, "whatsapp_notifications");
+  if (!consented) {
+    return { success: false, error: CONSENT_DENIED_ERROR };
   }
 
   const patient = encounter.patients as any;
