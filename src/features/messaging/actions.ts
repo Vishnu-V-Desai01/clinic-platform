@@ -679,6 +679,14 @@ export async function sendMessage(input: SendMessageInput) {
       details: { errorMessage: CONSENT_DENIED_ERROR },
     });
 
+    // Play error sound
+    try {
+      const { playSound } = await import('@/lib/sounds')
+      playSound('error')
+    } catch (err) {
+      console.debug('[sendMessage] Sound playback failed:', err)
+    }
+
     revalidatePath("/dashboard/messages");
     return { success: false, error: CONSENT_DENIED_ERROR };
   }
@@ -730,6 +738,14 @@ export async function sendMessage(input: SendMessageInput) {
       details: { providerMessageId: result.providerMessageId ?? null },
     });
 
+    // Play success sound
+    try {
+      const { playSound } = await import('@/lib/sounds')
+      playSound('success')
+    } catch (err) {
+      console.debug('[sendMessage] Sound playback failed:', err)
+    }
+
     revalidatePath("/dashboard/messages");
     return { success: true };
   }
@@ -751,6 +767,14 @@ export async function sendMessage(input: SendMessageInput) {
     provider: provider.name,
     details: { errorMessage: result.errorMessage ?? null },
   });
+
+  // Play error sound
+  try {
+    const { playSound } = await import('@/lib/sounds')
+    playSound('error')
+  } catch (err) {
+    console.debug('[sendMessage] Sound playback failed:', err)
+  }
 
   return { success: false, error: result.errorMessage ?? "Failed to send message" };
 }

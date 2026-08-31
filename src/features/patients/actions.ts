@@ -206,6 +206,14 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
       } catch (err) {
         console.error('[createPatient] Registration message failed:', err)
       }
+
+      // Play success sound after patient is created
+      try {
+        const { playSound } = await import('@/lib/sounds')
+        playSound('success')
+      } catch (err) {
+        console.debug('[createPatient] Sound playback failed:', err)
+      }
     })
 
     return { success: true, data: data as PatientRecord }
