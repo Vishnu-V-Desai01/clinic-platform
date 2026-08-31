@@ -30,8 +30,8 @@ import type {
   PaymentLineItem,
 } from './types';
 import { generateAndStorePaymentDocuments } from './document-storage';
-import { createReceiptMessage } from '@/features/messaging/actions';
-import type { z } from 'zod';
+import { createReceiptMessage, sendMessage } from '@/features/messaging/actions';
+import { z } from 'zod';
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: 'Cash',
@@ -1129,9 +1129,34 @@ export async function recordPaymentCollection(
         console.error('[recordPaymentCollection] Doc generation failed:', docError);
       }
 
-      // Queue WhatsApp receipt message — non-blocking
+      // Queue WhatsApp receipt message — non-blocking. Auto-send (Item 2)
+      // mirrors dispenseAndBillEncounter's medicine-receipt pattern exactly:
+      // queue always happens; whether it's ALSO sent immediately is gated
+      // by clinics.auto_send_consultation_receipts, fail-open to true on
+      // any read error so a broken setting never silently reverts to
+      // manual-only. A failed auto-send is non-fatal — the collection and
+      // queued message both stay committed; the message just sits pending
+      // as the manual fallback.
       try {
-        await createReceiptMessage({ paymentId: v.payment_id });
+        const messageResult = await createReceiptMessage({ paymentId: v.payment_id });
+
+        if (messageResult.success && messageResult.messageId) {
+          const { data: clinicSettings } = await supabase
+            .from('clinics')
+            .select('auto_send_consultation_receipts')
+            .eq('id', profile.clinic_id)
+            .single()
+            .returns<{ auto_send_consultation_receipts: boolean }>();
+
+          const autoSend = clinicSettings ? clinicSettings.auto_send_consultation_receipts : true;
+
+          if (autoSend) {
+            const sendResult = await sendMessage({ messageId: messageResult.messageId });
+            if (!sendResult.success) {
+              console.error('[recordPaymentCollection] auto-send failed:', sendResult.error);
+            }
+          }
+        }
       } catch (err) {
         console.error('[recordPaymentCollection] Receipt message failed:', err);
       }
@@ -1305,4 +1330,81 @@ export async function getPaymentAlerts(filters?: {
   }
 
   return (data || []) as PaymentAlert[];
+}
+
+// ============================================================================
+// ADMIN: AUTO-SEND CONSULTATION RECEIPTS SETTING
+//
+// clinics.auto_send_consultation_receipts, default true. Read by
+// recordPaymentCollection to decide whether to fire the WhatsApp send
+// immediately after the first payment collection, or leave the message
+// queued for manual send. Mirrors setAutoSendMedicineReceipts /
+// getAutoSendMedicineReceiptsSetting in features/pharmacy/actions.ts exactly
+// — same is_clinic_admin gate (not role === 'doctor'), same fail-open
+// default on read errors.
+// ============================================================================
+
+const SetAutoSendConsultationReceiptsSchema = z.object({
+  auto_send: z.boolean(),
+});
+
+export type SetAutoSendConsultationReceiptsInput = z.infer<typeof SetAutoSendConsultationReceiptsSchema>;
+
+type AutoSendConsultationReceiptsResult =
+  | { success: true; auto_send_consultation_receipts: boolean }
+  | { success: false; error: string };
+
+export async function setAutoSendConsultationReceipts(
+  input: SetAutoSendConsultationReceiptsInput
+): Promise<AutoSendConsultationReceiptsResult> {
+  const supabase = createServerSupabaseClient();
+  const profile = await getOrCreateProfile();
+
+  if (!profile) return { success: false, error: 'Profile not found' };
+  if (!profile.clinic_id) return { success: false, error: 'Your profile is not linked to a clinic.' };
+  if (!profile.is_clinic_admin) return { success: false, error: 'Only a clinic admin can change this setting.' };
+
+  const parsed = SetAutoSendConsultationReceiptsSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid request.' };
+  }
+
+  const { data, error } = await supabase
+    .from('clinics')
+    .update({ auto_send_consultation_receipts: parsed.data.auto_send })
+    .eq('id', profile.clinic_id)
+    .select('auto_send_consultation_receipts')
+    .single()
+    .returns<{ auto_send_consultation_receipts: boolean }>();
+
+  if (error || !data) {
+    console.error('[setAutoSendConsultationReceipts]', error);
+    return { success: false, error: 'Could not update this setting.' };
+  }
+
+  revalidatePath('/dashboard/settings');
+
+  return { success: true, auto_send_consultation_receipts: data.auto_send_consultation_receipts };
+}
+
+export async function getAutoSendConsultationReceiptsSetting(): Promise<AutoSendConsultationReceiptsResult> {
+  const supabase = createServerSupabaseClient();
+  const profile = await getOrCreateProfile();
+
+  if (!profile) return { success: false, error: 'Profile not found' };
+  if (!profile.clinic_id) return { success: false, error: 'Your profile is not linked to a clinic.' };
+
+  const { data, error } = await supabase
+    .from('clinics')
+    .select('auto_send_consultation_receipts')
+    .eq('id', profile.clinic_id)
+    .single()
+    .returns<{ auto_send_consultation_receipts: boolean }>();
+
+  if (error || !data) {
+    console.error('[getAutoSendConsultationReceiptsSetting]', error);
+    return { success: false, error: 'Could not load this setting.' };
+  }
+
+  return { success: true, auto_send_consultation_receipts: data.auto_send_consultation_receipts };
 }

@@ -32,6 +32,7 @@ import {
 } from "@/features/appointments/types"
 
 import { CarePlanView } from "@/features/care-plans/components/care-plan-view"
+import { notifyResult } from "@/lib/toast"
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                    */
@@ -119,11 +120,9 @@ export default function PatientProfile({
     if (!confirm("Archive this patient? They will no longer appear in the active list.")) return
     startTransition(async () => {
       const result = await archivePatient(patient.id)
-      if (result.success) {
+      if (notifyResult(result, "Patient archived")) {
         router.push("/dashboard/patients")
         router.refresh()
-      } else {
-        alert(result.error)
       }
     })
   }

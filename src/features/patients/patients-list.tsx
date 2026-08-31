@@ -24,6 +24,7 @@ import {
 import { archivePatient } from "./actions"
 import { genderLabel, statusLabel } from "./types"
 import type { PatientListItem, PatientStatus } from "./types"
+import { notifyResult } from "@/lib/toast"
 
 const PAGE_SIZE = 10
 
@@ -76,8 +77,9 @@ export default function PatientsList({ patients }: PatientsListProps) {
     if (!confirm("Archive this patient?")) return
     startTransition(async () => {
       const result = await archivePatient(id)
-      if (result.success) router.refresh()
-      else alert(result.error)
+      if (notifyResult(result, "Patient archived")) {
+        router.refresh()
+      }
     })
   }
 

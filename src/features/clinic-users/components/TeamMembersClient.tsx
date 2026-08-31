@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Copy, Check } from 'lucide-react'
+import { notifyResult } from '@/lib/toast'
 
 type TeamMember = {
   id: string
@@ -47,11 +48,12 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
         role: values.role,
         staffType: (values.staffType ?? null) as 'receptionist' | 'nurse' | 'assistant' | 'pharmacist' | null,
       })
+      // No success toast here on purpose — the invite-link dialog below is
+      // the success signal. A toast would fire and vanish behind the dialog.
       if (!result.success) {
-        window.alert(result.error)
+        notifyResult(result)
         return
       }
-      // Show the copyable invite link — admin sends this to the invitee manually
       const link = `${window.location.origin}/accept-invitation?token=${result.data.token}`
       setInviteLink(link)
       router.refresh()
@@ -69,7 +71,7 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
   function handleSuspend(id: string) {
     startTransition(async () => {
       const result = await suspendUser(id)
-      if (!result.success) window.alert(result.error)
+      notifyResult(result, 'Member suspended')
       router.refresh()
     })
   }
@@ -77,7 +79,7 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
   function handleReactivate(id: string) {
     startTransition(async () => {
       const result = await reactivateUser(id)
-      if (!result.success) window.alert(result.error)
+      notifyResult(result, 'Member reactivated')
       router.refresh()
     })
   }
@@ -85,7 +87,7 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
   function handleRemove(id: string) {
     startTransition(async () => {
       const result = await removeUser(id)
-      if (!result.success) window.alert(result.error)
+      notifyResult(result, 'Member removed')
       router.refresh()
     })
   }
@@ -93,7 +95,7 @@ export function TeamMembersClient({ users }: { users: ClinicUser[] }) {
   function handleTogglePharmacyAccess(id: string, granted: boolean) {
     startTransition(async () => {
       const result = await setPharmacyAccess({ profile_id: id, pharmacy_access: granted })
-      if (!result.ok) window.alert(result.error)
+      notifyResult(result, granted ? 'Pharmacy access granted' : 'Pharmacy access removed')
       router.refresh()
     })
   }
