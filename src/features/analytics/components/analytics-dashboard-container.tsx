@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import AnalyticsDashboard from './analytics-dashboard'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   getDoctorDashboardData,
   getDoctorDashboardSeries,
@@ -44,6 +45,68 @@ function toBannerAnomaly(record: AnomalyAlertRecord) {
   }
 }
 
+function AnalyticsDashboardSkeleton() {
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-8 w-56" />
+            <Skeleton className="h-4 w-40" />
+          </div>
+          <Skeleton className="size-9 rounded-lg" />
+        </div>
+
+        {/* Filter pills */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-20 rounded-md" />
+          ))}
+        </div>
+
+        {/* Income section */}
+        <div className="mb-8">
+          <Skeleton className="mb-4 h-6 w-24" />
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border p-5">
+                <Skeleton className="mb-2 h-3 w-20" />
+                <Skeleton className="h-7 w-24" />
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl border border-border p-5">
+            <Skeleton className="mb-4 h-4 w-32" />
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+        </div>
+
+        {/* Activity section */}
+        <div className="mb-8">
+          <Skeleton className="mb-4 h-6 w-24" />
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border p-5">
+                <Skeleton className="mb-2 h-3 w-24" />
+                <Skeleton className="h-7 w-16" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border p-5">
+                <Skeleton className="mb-4 h-4 w-32" />
+                <Skeleton className="h-[250px] w-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AnalyticsDashboardContainer() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -67,7 +130,7 @@ export default function AnalyticsDashboardContainer() {
   getAppointmentEfficiency(filter),
 ])
 
-    // Summary cards are the core of the page — a failure here is fatal.
+    // Summary cards are the core of the page â€” a failure here is fatal.
     if (!dataRes.success) {
       setError(dataRes.error)
       setResult(null)
@@ -76,7 +139,7 @@ export default function AnalyticsDashboardContainer() {
     }
     setResult(dataRes.data)
 
-    // Charts, alerts, and efficiency all degrade gracefully — the cards
+    // Charts, alerts, and efficiency all degrade gracefully â€” the cards
     // still work without them.
     if (seriesRes.success) {
       setSeries(seriesRes.data)
@@ -102,7 +165,7 @@ export default function AnalyticsDashboardContainer() {
     setLoading(false)
   }, [])
 
-  // Initial load only — subsequent loads are triggered by handleRangeChange.
+  // Initial load only â€” subsequent loads are triggered by handleRangeChange.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     load(currentFilter)
@@ -123,7 +186,7 @@ export default function AnalyticsDashboardContainer() {
       const res = await runDailyRollup()
       if (res.success) {
         setRollupMessage(
-          `Rolled up ${res.data.date} — ${res.data.alertsTriggered} alert(s) triggered.`,
+          `Rolled up ${res.data.date} â€” ${res.data.alertsTriggered} alert(s) triggered.`,
         )
         await load(currentFilter)
       } else {
@@ -133,11 +196,7 @@ export default function AnalyticsDashboardContainer() {
   }
 
   if (loading && !result) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading analytics…</p>
-      </div>
-    )
+    return <AnalyticsDashboardSkeleton />
   }
 
   if (error) {
