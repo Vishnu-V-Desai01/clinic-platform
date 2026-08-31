@@ -288,13 +288,13 @@ export default function StaffDashboardView({
   }
 
   return (
-    <main className="w-full bg-background p-4 text-foreground sm:p-6">
+    <main className="curakin-preview w-full bg-background p-4 text-foreground sm:p-6">
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
-          <Card>
+          <Card className="curakin-card-flat rounded-xl">
             <CardHeader className="gap-1 px-4 py-4">
               <div className="flex items-center gap-2">
-                <CardTitle className="text-base">Appointment Requests</CardTitle>
+                <h3 className="curakin-h3">Appointment Requests</h3>
                 <Badge className="bg-primary text-primary-foreground">{pendingRequests.length} pending</Badge>
               </div>
             </CardHeader>
@@ -355,10 +355,10 @@ export default function StaffDashboardView({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="curakin-card-flat rounded-xl">
             <CardHeader className="flex-row items-start justify-between px-4 py-4">
               <div>
-                <CardTitle className="text-base">Today&apos;s Schedule</CardTitle>
+                <h3 className="curakin-h3">Today&apos;s Schedule</h3>
                 <CardDescription>{formatToday()}</CardDescription>
               </div>
               <Button size="sm" variant="outline" onClick={() => (onPrintSchedule ? onPrintSchedule() : window.print())}>
@@ -407,11 +407,11 @@ export default function StaffDashboardView({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="curakin-card-flat rounded-xl">
             <CardHeader className="gap-1 px-4 py-4">
               <div className="flex items-center gap-2">
                 <Pill className="size-4 text-primary" aria-hidden="true" />
-                <CardTitle className="text-base">Recent Medicine Sales</CardTitle>
+                <h3 className="curakin-h3">Recent Medicine Sales</h3>
               </div>
               <CardDescription>Pharmacy dispensing, attributed to the prescribing doctor</CardDescription>
             </CardHeader>
@@ -458,9 +458,9 @@ export default function StaffDashboardView({
         </div>
 
         <aside className="flex min-w-0 flex-col gap-4">
-          <Card>
+          <Card className="curakin-card-flat rounded-xl">
             <CardHeader className="gap-1 px-4 py-4">
-              <CardTitle className="text-base">Missing Patient Email</CardTitle>
+              <h3 className="curakin-h3">Missing Patient Email</h3>
               <CardDescription>These patients can&apos;t access the patient portal or link a family account</CardDescription>
             </CardHeader>
             <CardContent className="px-4 pb-4">
@@ -519,9 +519,9 @@ export default function StaffDashboardView({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="curakin-card-flat rounded-xl">
             <CardHeader className="px-4 py-4">
-              <CardTitle className="text-base">Outstanding Payments</CardTitle>
+              <h3 className="curakin-h3">Outstanding Payments</h3>
             </CardHeader>
             <CardContent className="px-4 pb-4">
               {isLoading ? (
@@ -547,16 +547,15 @@ export default function StaffDashboardView({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="flex items-start gap-3 px-4 py-4">
-              <Bell aria-hidden="true" className="mt-1 size-5 text-primary" />
-              <div>
-                <p className="text-base font-semibold">Reminders Due Today</p>
-                <p className="text-3xl font-semibold leading-tight">{remindersDueToday}</p>
-                <p className="text-sm">Reminders scheduled for today</p>
-                <p className="text-xs text-muted-foreground">Sent automatically — no action needed</p>
+          <Card className="curakin-stat-card rounded-xl p-5 transition-shadow hover:shadow-md">
+            <div className="mb-2 flex items-center gap-2">
+              <div className="curakin-stat-icon">
+                <Bell className="size-4" aria-hidden="true" />
               </div>
-            </CardContent>
+              <p className="curakin-caption">Reminders due today</p>
+            </div>
+            <p className="text-2xl font-semibold text-foreground">{remindersDueToday}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Sent automatically — no action needed</p>
           </Card>
         </aside>
       </div>
