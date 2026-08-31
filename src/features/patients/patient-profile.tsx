@@ -55,33 +55,41 @@ function formatSince(iso: string): string {
   })
 }
 
+// Step C: same status-colour tokens used in patients-list.tsx — kept in
+// sync deliberately rather than each file inventing its own emerald/amber
+// values.
 const STATUS_BADGE: Record<PatientStatus, string> = {
   active:
-    "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "border-transparent bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
   inactive:
     "border-border bg-muted text-muted-foreground",
   archived:
-    "border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    "border-transparent bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]",
 }
 
+// Step C: same tokens as appointments-list.tsx's STATUS_STYLES — encounter
+// status only has 3 states (no "no_show" equivalent), mapped onto the same
+// info/success/danger vocabulary.
 const ENCOUNTER_STATUS_BADGE: Record<EncounterStatus, string> = {
   active:
-    "border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    "border-transparent bg-[var(--status-info-bg)] text-[var(--status-info-text)]",
   completed:
-    "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "border-transparent bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
   cancelled:
-    "border-destructive/30 bg-destructive/10 text-destructive",
+    "border-transparent bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]",
 }
 
+// Step C: identical vocabulary to appointments-list.tsx's STATUS_STYLES —
+// this was a separate, duplicated copy of the same four colours before.
 const APPOINTMENT_STATUS_BADGE: Record<AppointmentStatus, string> = {
   scheduled:
-    "border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    "border-transparent bg-[var(--status-info-bg)] text-[var(--status-info-text)]",
   completed:
-    "border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "border-transparent bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
   cancelled:
-    "border-destructive/30 bg-destructive/10 text-destructive",
+    "border-transparent bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]",
   no_show:
-    "border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    "border-transparent bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]",
 }
 
 function EmptyState({ title, note }: { title: string; note?: string }) {
@@ -133,7 +141,7 @@ export default function PatientProfile({
       {/* Page header */}
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="curakin-h1">
             Patient Profile
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">

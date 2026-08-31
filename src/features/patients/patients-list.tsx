@@ -32,13 +32,18 @@ function getInitials(firstName: string, lastName: string) {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
 }
 
+// Step C: patient status mapped onto the shared status-colour language.
+// "active" reads as success (in good standing), "archived" as warning
+// (needs no action but is a state worth noticing), "inactive" stays a
+// plain neutral badge — there's no dedicated neutral status token since
+// the base --muted tokens already cover that case.
 const STATUS_BADGE_CLASSES: Record<PatientStatus, string> = {
   active:
-    "border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "border-transparent bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
   inactive:
     "border-transparent bg-muted text-muted-foreground",
   archived:
-    "border-transparent bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    "border-transparent bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]",
 }
 
 interface PatientsListProps {
@@ -89,7 +94,7 @@ export default function PatientsList({ patients }: PatientsListProps) {
       {/* Header */}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="curakin-h1">
             Patients
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">

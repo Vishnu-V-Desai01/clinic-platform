@@ -17,6 +17,12 @@
 //     (staff only ever get the Charges step inside the modal itself —
 //     this button's visibility is UX only; getVisitPrefill/completeVisit
 //     independently re-verify permission server-side either way.)
+//
+// Step C: STATUS_STYLES moved onto the shared --status-* colour tokens
+// instead of hardcoded emerald/sky/amber/destructive Tailwind classes —
+// same colours as before, now centrally defined so this and
+// patient-profile.tsx (which had its own duplicate copy of this map)
+// stay in sync going forward.
 
 "use client"
 
@@ -75,10 +81,10 @@ import EditVisitButton from "@/features/post-visit/components/EditVisitButton"
 const PAGE_SIZE = 10
 
 const STATUS_STYLES: Record<AppointmentStatus, string> = {
-  scheduled: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
-  completed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  cancelled: "bg-destructive/15 text-destructive",
-  no_show:   "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  scheduled: "bg-[var(--status-info-bg)] text-[var(--status-info-text)]",
+  completed: "bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
+  cancelled: "bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]",
+  no_show:   "bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]",
 }
 
 function StatusBadge({ status }: { status: AppointmentStatus }) {
