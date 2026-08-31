@@ -32,7 +32,14 @@ export default function DocumentDownloadButton({
     // popup blockers don't intercept it — we only navigate it once the
     // PDF is actually ready, rather than pointing it straight at the API
     // route the moment the user clicks.
-    const newTab = window.open('', '_blank', 'noopener,noreferrer')
+    //
+    // Deliberately NOT passing noopener/noreferrer here: those flags make
+    // window.open() return null, which meant we could never get a handle
+    // back to navigate this tab once the PDF was ready — the tab would
+    // open blank and just sit there. The tab only ever gets a same-origin
+    // blob: URL we generate ourselves below, so there's no security
+    // downside to keeping the reference.
+    const newTab = window.open('', '_blank')
 
     try {
       const res = await fetch(href)
@@ -40,11 +47,12 @@ export default function DocumentDownloadButton({
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
 
-      if (newTab) {
+      if (newTab && !newTab.closed) {
         newTab.location.href = blobUrl
       } else {
-        // Popup was blocked despite the synchronous open (some browsers
-        // still block it) — fall back to opening after the fact.
+        // Reference unavailable or the tab got closed in the meantime —
+        // fall back to opening fresh. This one can safely carry
+        // noopener/noreferrer since we don't need a reference to it.
         window.open(blobUrl, '_blank', 'noopener,noreferrer')
       }
 
