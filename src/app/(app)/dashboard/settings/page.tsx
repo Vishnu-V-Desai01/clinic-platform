@@ -4,11 +4,12 @@ import { Settings } from 'lucide-react';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
 import { getClinicSettings } from '@/features/clinic/actions';
 import { getAutoSendMedicineReceiptsSetting } from '@/features/pharmacy/actions';
+import { getAutoSendConsultationReceiptsSetting } from '@/features/payments/actions';
 import ClinicSettingsForm from '@/features/clinic/components/clinic-settings-form';
 import PharmacyMessagingSettingsCard from '@/features/pharmacy/components/pharmacy-messaging-settings-card';
-
+import ConsultationMessagingSettingsCard from '@/features/payments/components/consultation-messaging-settings-card';
+import ManualReminderTriggerCard from '@/features/reminders/components/manual-reminder-trigger-card';
 export const metadata = { title: 'Clinic Settings' };
-
 export default async function SettingsPage() {
   const profile = await getOrCreateProfile();
   if (!profile || !['doctor', 'staff'].includes(profile.role)) {
@@ -32,7 +33,6 @@ export default async function SettingsPage() {
   // enforced in updateClinicSettings. A non-admin doctor/staff member still
   // sees the page (read access is fine) but the form renders view-only.
   const canEdit = profile.is_clinic_admin;
-
   // Independent from the clinic-identity form above: gated by
   // is_clinic_admin (any admin — doctor or staff), not role === 'doctor'.
   // A failed fetch degrades to hiding the card rather than breaking the
@@ -40,7 +40,11 @@ export default async function SettingsPage() {
   // same "module might not be enabled" possibility elsewhere.
   const autoSendResult = await getAutoSendMedicineReceiptsSetting();
   const autoSendMedicineReceipts = autoSendResult.ok ? autoSendResult.data : null;
-
+  // Same pattern, consultation receipts (Item 2).
+  const autoSendConsultationResult = await getAutoSendConsultationReceiptsSetting();
+  const autoSendConsultationReceipts = autoSendConsultationResult.success
+    ? autoSendConsultationResult.auto_send_consultation_receipts
+    : null;
   return (
     <div className="p-4 md:p-8">
       <div className="max-w-2xl mx-auto space-y-8">
@@ -59,15 +63,20 @@ export default async function SettingsPage() {
             </p>
           </div>
         </div>
-
         <ClinicSettingsForm clinic={clinic} canEdit={canEdit} />
-
+        {autoSendConsultationReceipts !== null && (
+          <ConsultationMessagingSettingsCard
+            initialAutoSend={autoSendConsultationReceipts}
+            canEdit={profile.is_clinic_admin}
+          />
+        )}
         {autoSendMedicineReceipts !== null && (
           <PharmacyMessagingSettingsCard
             initialAutoSend={autoSendMedicineReceipts}
             canEdit={profile.is_clinic_admin}
           />
         )}
+        <ManualReminderTriggerCard canEdit={profile.is_clinic_admin} />
       </div>
     </div>
   );
