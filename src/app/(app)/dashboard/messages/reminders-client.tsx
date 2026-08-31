@@ -42,6 +42,9 @@ interface RemindersClientProps {
   overageRatePaise: number;
 }
 
+// Step C: message TYPE (registration/receipt/appointment) is a category,
+// not a good/bad/neutral status — deliberately NOT mapped onto the
+// --status-* tokens, which are reserved for genuine status meaning.
 function TypeBadge({ type }: { type: "registration" | "receipt" | "appointment" }) {
   const config: Record<string, { className: string; label: string }> = {
     registration: {
@@ -61,12 +64,16 @@ function TypeBadge({ type }: { type: "registration" | "receipt" | "appointment" 
   return <Badge className={className}>{label}</Badge>;
 }
 
+// Step C: moved onto the shared --status-* tokens — same colours as
+// before, now centrally defined. "expired" reads as warning (not danger)
+// since it's an inaction outcome, not a failure; matches how anomaly
+// banners elsewhere treat "needs attention but not broken".
 function StatusBadge({ status }: { status: "sent" | "failed" | "cancelled" | "expired" }) {
-  const config = {
-    sent: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-0",
-    failed: "bg-destructive/15 text-destructive border-0",
+  const config: Record<string, string> = {
+    sent: "bg-[var(--status-success-bg)] text-[var(--status-success-text)] border-0",
+    failed: "bg-[var(--status-danger-bg)] text-[var(--status-danger-text)] border-0",
     cancelled: "bg-muted text-muted-foreground border-0",
-    expired: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-0",
+    expired: "bg-[var(--status-warning-bg)] text-[var(--status-warning-text)] border-0",
   };
   return (
     <Badge className={`${config[status]} capitalize`}>{status}</Badge>
@@ -147,14 +154,14 @@ export function RemindersClient({
   };
 
   return (
-    <div className="space-y-8 p-6 md:p-10 max-w-[1600px] mx-auto w-full">
+    <div className="curakin-preview space-y-8 bg-background p-6 md:p-10 max-w-[1600px] mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">WhatsApp Reminders</h1>
+        <h1 className="curakin-h1">WhatsApp Reminders</h1>
         <span
           className={`px-4 py-2 rounded-full text-sm font-medium ${
             isOverage
-              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+              ? "bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]"
               : "bg-muted text-muted-foreground"
           }`}
         >
@@ -182,7 +189,7 @@ export function RemindersClient({
         {/* Section 1: Ready to Send */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-primary">Ready to Send</h2>
+            <h2 className="curakin-h2 text-primary">Ready to Send</h2>
             <Badge variant="secondary">{ready.length}</Badge>
           </div>
 
@@ -199,7 +206,7 @@ export function RemindersClient({
 
           <div className="space-y-3">
             {ready.length === 0 ? (
-              <Card className="p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
+              <Card className="curakin-card-flat p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
                 <Check className="w-10 h-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">No messages ready to send.</p>
               </Card>
@@ -210,7 +217,7 @@ export function RemindersClient({
                 return (
                   <Card
                     key={msg.id}
-                    className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                    className="curakin-card-flat p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                   >
                     <div className="flex-1 space-y-2 min-w-0">
                       <p className="font-medium text-foreground truncate">{msg.patientName}</p>
@@ -266,7 +273,7 @@ export function RemindersClient({
         {/* Section 2: Scheduled Reminders */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">
+            <h2 className="curakin-h2 text-indigo-600 dark:text-indigo-400">
               Scheduled Reminders
             </h2>
             <Badge variant="secondary">{scheduled.length}</Badge>
@@ -274,7 +281,7 @@ export function RemindersClient({
 
           <div className="space-y-3">
             {scheduled.length === 0 ? (
-              <Card className="p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
+              <Card className="curakin-card-flat p-10 flex flex-col items-center justify-center text-center gap-3 min-h-[220px]">
                 <CalendarClock className="w-10 h-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
                   No appointment reminders scheduled.
@@ -286,7 +293,7 @@ export function RemindersClient({
                 return (
                   <Card
                     key={reminder.id}
-                    className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                    className="curakin-card-flat p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                   >
                     <div className="flex-1 space-y-2 min-w-0">
                       <p className="font-medium text-foreground truncate">{reminder.patientName}</p>
@@ -333,7 +340,7 @@ export function RemindersClient({
           aria-expanded={archiveExpanded}
         >
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-muted-foreground">Archive</h2>
+            <h2 className="curakin-h2 text-muted-foreground">Archive</h2>
             <Badge variant="secondary">{archive.length}</Badge>
           </div>
           <ChevronDown
@@ -347,7 +354,7 @@ export function RemindersClient({
           archive.length === 0 ? (
             <p className="text-sm text-muted-foreground px-1">No archived messages yet.</p>
           ) : (
-            <Card className="overflow-hidden">
+            <Card className="curakin-card-flat overflow-hidden">
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
