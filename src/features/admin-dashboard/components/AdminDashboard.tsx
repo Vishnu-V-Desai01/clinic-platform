@@ -3,7 +3,17 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { MailPlus, Inbox, UserPlus, X, Percent } from 'lucide-react';
+import {
+  MailPlus,
+  Inbox,
+  UserPlus,
+  X,
+  Percent,
+  Wallet,
+  Users,
+  CalendarClock,
+  UserCheck,
+} from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -123,10 +133,21 @@ function generateSampleData() {
   return { kpis, activitySeries, pendingInvitations };
 }
 
-function StatCard({ label, value }: { label: string; value: string | number }) {
+function StatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+}) {
   return (
-    <div className="border border-border bg-card rounded-xl shadow-sm p-5">
-      <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
+    <div className="curakin-stat-card rounded-xl p-5 transition-shadow hover:shadow-md">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="curakin-stat-icon">{icon}</div>
+        <p className="curakin-caption">{label}</p>
+      </div>
       <p className="text-2xl font-semibold text-foreground">{value}</p>
     </div>
   );
@@ -179,9 +200,9 @@ function PendingInvitationsSection({
 }) {
   if (!hasTeamMembers && (!pendingInvitations || pendingInvitations.length === 0)) {
     return (
-      <div className="border border-border bg-card rounded-xl shadow-sm p-5 flex flex-col items-center justify-center py-12">
+      <div className="curakin-card-flat rounded-xl p-5 flex flex-col items-center justify-center py-12">
         <UserPlus className="w-12 h-12 mb-4 text-muted-foreground" aria-hidden="true" />
-        <h3 className="text-lg font-semibold text-foreground mb-2">Invite your first staff member</h3>
+        <h3 className="curakin-h3 mb-2">Invite your first staff member</h3>
         <p className="text-sm text-muted-foreground mb-6 text-center">Add a receptionist, nurse, or another doctor to your clinic.</p>
         <Button onClick={onInviteUser}>
           <MailPlus className="w-4 h-4 mr-2" aria-hidden="true" />
@@ -192,8 +213,8 @@ function PendingInvitationsSection({
   }
 
   return (
-    <div className="border border-border bg-card rounded-xl shadow-sm p-5">
-      <h2 className="text-lg font-semibold text-foreground mb-4">Pending Invitations</h2>
+    <div className="curakin-card-flat rounded-xl p-5">
+      <h3 className="curakin-h3 mb-4">Pending Invitations</h3>
       {!pendingInvitations || pendingInvitations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
           <Inbox className="w-10 h-10 mb-2" aria-hidden="true" />
@@ -232,8 +253,8 @@ function PendingInvitationsSection({
   );
 }
 
-// Objective 9 — mirrors PendingInvitationsSection's structure (bordered
-// card, header + list/empty-state), so it fits the existing visual language
+// Objective 9 — mirrors PendingInvitationsSection's structure (flat card,
+// header + list/empty-state), so it fits the existing visual language
 // rather than introducing a new pattern. Only rendered at all when there's
 // at least one discounted bill — an empty card here would be noise, unlike
 // the invitations card which has a deliberate "invite your first" CTA.
@@ -241,10 +262,10 @@ function DiscountedMedicineBillsSection({ bills }: { bills: DiscountedMedicineBi
   if (bills.length === 0) return null;
 
   return (
-    <div className="border border-border bg-card rounded-xl shadow-sm p-5">
+    <div className="curakin-card-flat rounded-xl p-5">
       <div className="flex items-center gap-2 mb-4">
         <Percent className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-        <h2 className="text-lg font-semibold text-foreground">Discounted Medicine Bills</h2>
+        <h3 className="curakin-h3">Discounted Medicine Bills</h3>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
         Recent medicine bills where the charged amount was reduced from the computed price.
@@ -291,9 +312,9 @@ export default function AdminDashboard({
   const displayPendingInvitations = pendingInvitations ?? sampleData!.pendingInvitations;
 
   return (
-    <div className="space-y-6">
+    <div className="curakin-preview space-y-6 bg-background p-4 sm:p-6 -m-4 md:-m-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">Dashboard</h1>
+        <h1 className="curakin-h1">Dashboard</h1>
         <Button onClick={onInviteUser}>
           <MailPlus className="w-4 h-4 mr-2" aria-hidden="true" />
           Invite staff or doctor
@@ -309,15 +330,31 @@ export default function AdminDashboard({
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Revenue (This Month)" value={formatINR(displayKpis.totalRevenuePaise)} />
-        <StatCard label="Total Patients" value={displayKpis.totalPatients.toLocaleString('en-IN')} />
-        <StatCard label="Appointments Today" value={displayKpis.appointmentsToday} />
-        <StatCard label="Active Staff" value={displayKpis.activeStaff} />
+        <StatCard
+          label="Total Revenue (This Month)"
+          value={formatINR(displayKpis.totalRevenuePaise)}
+          icon={<Wallet className="size-4" aria-hidden="true" />}
+        />
+        <StatCard
+          label="Total Patients"
+          value={displayKpis.totalPatients.toLocaleString('en-IN')}
+          icon={<Users className="size-4" aria-hidden="true" />}
+        />
+        <StatCard
+          label="Appointments Today"
+          value={displayKpis.appointmentsToday}
+          icon={<CalendarClock className="size-4" aria-hidden="true" />}
+        />
+        <StatCard
+          label="Active Staff"
+          value={displayKpis.activeStaff}
+          icon={<UserCheck className="size-4" aria-hidden="true" />}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 border border-border bg-card rounded-xl shadow-sm p-5 text-muted-foreground">
-          <h2 className="text-lg font-semibold text-foreground mb-1">Clinic Activity</h2>
+        <div className="curakin-card-flat lg:col-span-2 rounded-xl p-5 text-muted-foreground">
+          <h3 className="curakin-h3 mb-1">Clinic Activity</h3>
           <p className="text-sm text-muted-foreground mb-4">Appointment volume per day, last 30 days</p>
           <ClinicActivityChart activitySeries={displayActivitySeries} />
         </div>

@@ -15,12 +15,6 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -125,17 +119,30 @@ function StockBadge({ prescription }: { prescription: PendingPrescription }) {
   )
 }
 
-function SummaryCard({ label, value, icon: Icon, warning }: { label: string; value: number; icon: typeof ClipboardList; warning?: boolean }) {
+function SummaryCard({
+  label,
+  value,
+  icon: Icon,
+  warning,
+}: {
+  label: string
+  value: number
+  icon: typeof ClipboardList
+  warning?: boolean
+}) {
+  const isWarning = warning && value > 0
   return (
-    <Card>
-      <CardContent className="flex items-center justify-between gap-4 p-5">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm text-muted-foreground">{label}</span>
-          <span className={warning && value > 0 ? 'text-3xl font-semibold tracking-tight text-amber-700 dark:text-amber-400' : 'text-3xl font-semibold tracking-tight'}>{value}</span>
+    <div className="curakin-stat-card rounded-xl p-5 transition-shadow hover:shadow-md">
+      <div className="mb-2 flex items-center gap-2">
+        <div className={isWarning ? 'curakin-stat-icon-amber' : 'curakin-stat-icon'}>
+          <Icon className="size-4" aria-hidden="true" />
         </div>
-        <Icon className="size-5 text-muted-foreground" aria-hidden="true" />
-      </CardContent>
-    </Card>
+        <p className="curakin-caption">{label}</p>
+      </div>
+      <span className={isWarning ? 'text-2xl font-semibold tracking-tight text-amber-700 dark:text-amber-400' : 'text-2xl font-semibold tracking-tight text-foreground'}>
+        {value}
+      </span>
+    </div>
   )
 }
 
@@ -149,10 +156,10 @@ export default function PharmacyDashboard({
   const activateRow = (prescription: PendingPrescription) => onRowClick?.(prescription)
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-4 sm:p-6 lg:p-8">
+    <main className="curakin-preview mx-auto flex w-full max-w-7xl flex-col gap-8 bg-background p-4 sm:p-6 lg:p-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Pharmacy</h1>
+          <h1 className="curakin-h1">Pharmacy</h1>
           <p className="text-sm text-muted-foreground">Today&apos;s queue and stock status.</p>
         </div>
         <Button asChild variant="outline" className="w-full sm:w-auto">
@@ -170,79 +177,75 @@ export default function PharmacyDashboard({
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.36fr)] lg:items-start">
         <section aria-labelledby="pending-heading" className="flex min-w-0 flex-col gap-3">
           <div className="flex items-center justify-between gap-4">
-            <h2 id="pending-heading" className="text-sm font-semibold uppercase tracking-wide text-foreground">Pending prescriptions</h2>
+            <h2 id="pending-heading" className="curakin-caption">Pending prescriptions</h2>
             <span className="text-sm text-muted-foreground">{summary.pending} waiting</span>
           </div>
-          <Card className="overflow-hidden">
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="flex flex-col gap-3 p-4" aria-label="Loading prescriptions">
-                  {Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-10 w-full" />)}
-                </div>
-              ) : pending.length === 0 ? (
-                <div className="flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
-                  <CheckCircle2 className="size-8 text-muted-foreground" aria-hidden="true" />
-                  <p className="text-sm text-muted-foreground">No prescriptions waiting</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Patient</TableHead><TableHead>Doctor</TableHead><TableHead>Drug</TableHead><TableHead>Dosage</TableHead><TableHead>Prescribed date</TableHead><TableHead className="text-right">Stock</TableHead>
+          <div className="curakin-card-flat overflow-hidden rounded-xl">
+            {isLoading ? (
+              <div className="flex flex-col gap-3 p-4" aria-label="Loading prescriptions">
+                {Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+              </div>
+            ) : pending.length === 0 ? (
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
+                <CheckCircle2 className="size-8 text-muted-foreground" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">No prescriptions waiting</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Patient</TableHead><TableHead>Doctor</TableHead><TableHead>Drug</TableHead><TableHead>Dosage</TableHead><TableHead>Prescribed date</TableHead><TableHead className="text-right">Stock</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pending.map((prescription) => (
+                      <TableRow
+                        key={prescription.id}
+                        role="button"
+                        tabIndex={0}
+                        className="cursor-pointer focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-muted/50"
+                        onClick={() => activateRow(prescription)}
+                        onKeyDown={(event) => {
+                          if ((event.key === 'Enter' || event.key === ' ') && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                            event.preventDefault()
+                            activateRow(prescription)
+                          }
+                        }}
+                      >
+                        <TableCell className="font-medium">{prescription.patientName}</TableCell>
+                        <TableCell>{prescription.doctorName ? `Dr. ${prescription.doctorName}` : <span className="text-muted-foreground">Unassigned</span>}</TableCell>
+                        <TableCell>{prescription.drugName}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{formatDosageLine(prescription.dosage, prescription.frequency, prescription.duration)}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatDate(prescription.prescribedDate)}</TableCell>
+                        <TableCell className="text-right"><StockBadge prescription={prescription} /></TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pending.map((prescription) => (
-                        <TableRow
-                          key={prescription.id}
-                          role="button"
-                          tabIndex={0}
-                          className="cursor-pointer focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-muted/50"
-                          onClick={() => activateRow(prescription)}
-                          onKeyDown={(event) => {
-                            if ((event.key === 'Enter' || event.key === ' ') && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-                              event.preventDefault()
-                              activateRow(prescription)
-                            }
-                          }}
-                        >
-                          <TableCell className="font-medium">{prescription.patientName}</TableCell>
-                          <TableCell>{prescription.doctorName ? `Dr. ${prescription.doctorName}` : <span className="text-muted-foreground">Unassigned</span>}</TableCell>
-                          <TableCell>{prescription.drugName}</TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">{formatDosageLine(prescription.dosage, prescription.frequency, prescription.duration)}</TableCell>
-                          <TableCell className="whitespace-nowrap">{formatDate(prescription.prescribedDate)}</TableCell>
-                          <TableCell className="text-right"><StockBadge prescription={prescription} /></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
         </section>
 
         <section aria-labelledby="dispensed-heading" className="flex flex-col gap-3">
-          <h2 id="dispensed-heading" className="text-sm font-semibold uppercase tracking-wide text-foreground">Dispensed today</h2>
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Recent activity</CardTitle></CardHeader>
-            <CardContent className="flex flex-col gap-0 pt-0">
-              {isLoading ? (
-                <div className="flex flex-col gap-3" aria-label="Loading dispensed prescriptions">
-                  {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-7 w-full" />)}
+          <h2 id="dispensed-heading" className="curakin-caption">Dispensed today</h2>
+          <div className="curakin-card-flat rounded-xl p-5">
+            <h3 className="curakin-h3 mb-3">Recent activity</h3>
+            {isLoading ? (
+              <div className="flex flex-col gap-3" aria-label="Loading dispensed prescriptions">
+                {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-7 w-full" />)}
+              </div>
+            ) : dispensedToday.length === 0 ? (
+              <p className="py-6 text-sm text-muted-foreground">No prescriptions dispensed yet.</p>
+            ) : (
+              dispensedToday.map((item) => (
+                <div key={item.id} className="border-b border-border py-3 text-sm last:border-b-0">
+                  <p className="leading-6 text-foreground">{item.patientName} <span className="text-muted-foreground">—</span> {item.drugName} <span className="text-muted-foreground">×{item.quantity} · {formatTime(item.dispensedAt)}</span></p>
                 </div>
-              ) : dispensedToday.length === 0 ? (
-                <p className="py-6 text-sm text-muted-foreground">No prescriptions dispensed yet.</p>
-              ) : (
-                dispensedToday.map((item) => (
-                  <div key={item.id} className="border-b border-border py-3 text-sm last:border-b-0">
-                    <p className="leading-6 text-foreground">{item.patientName} <span className="text-muted-foreground">—</span> {item.drugName} <span className="text-muted-foreground">×{item.quantity} · {formatTime(item.dispensedAt)}</span></p>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+              ))
+            )}
+          </div>
         </section>
       </div>
     </main>
