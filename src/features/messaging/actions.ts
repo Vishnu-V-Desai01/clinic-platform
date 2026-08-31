@@ -628,6 +628,9 @@ const token = await regenerateDocumentLink(supabase, doc.id, profile.clinic_id, 
 // ============================================================================
 // sendMessage
 // ============================================================================
+// ============================================================================
+// sendMessage
+// ============================================================================
 export async function sendMessage(input: SendMessageInput) {
   const profile = await requireRole("doctor", "staff");
   const { messageId } = sendMessageInputSchema.parse(input);
@@ -680,11 +683,13 @@ export async function sendMessage(input: SendMessageInput) {
     });
 
     // Play error sound
-    try {
-      const { playSound } = await import('@/lib/sounds')
-      playSound('error')
-    } catch (err) {
-      console.debug('[sendMessage] Sound playback failed:', err)
+    if (typeof window !== 'undefined') {
+      try {
+        const { playSound } = await import('@/lib/sounds')
+        playSound('error')
+      } catch (err) {
+        console.debug('[sendMessage] Sound playback failed:', err)
+      }
     }
 
     revalidatePath("/dashboard/messages");
@@ -739,11 +744,13 @@ export async function sendMessage(input: SendMessageInput) {
     });
 
     // Play success sound
-    try {
-      const { playSound } = await import('@/lib/sounds')
-      playSound('success')
-    } catch (err) {
-      console.debug('[sendMessage] Sound playback failed:', err)
+    if (typeof window !== 'undefined') {
+      try {
+        const { playSound } = await import('@/lib/sounds')
+        playSound('success')
+      } catch (err) {
+        console.debug('[sendMessage] Sound playback failed:', err)
+      }
     }
 
     revalidatePath("/dashboard/messages");
@@ -769,16 +776,17 @@ export async function sendMessage(input: SendMessageInput) {
   });
 
   // Play error sound
-  try {
-    const { playSound } = await import('@/lib/sounds')
-    playSound('error')
-  } catch (err) {
-    console.debug('[sendMessage] Sound playback failed:', err)
+  if (typeof window !== 'undefined') {
+    try {
+      const { playSound } = await import('@/lib/sounds')
+      playSound('error')
+    } catch (err) {
+      console.debug('[sendMessage] Sound playback failed:', err)
+    }
   }
 
   return { success: false, error: result.errorMessage ?? "Failed to send message" };
 }
-
 // ============================================================================
 // sendAllMessages
 // ============================================================================

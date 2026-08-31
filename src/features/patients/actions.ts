@@ -208,6 +208,9 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
       }
 
       // Play success sound after patient is created
+      // Only run on client side — avoid server-side audio context issues
+      if (typeof window === 'undefined') return
+      
       try {
         const { playSound } = await import('@/lib/sounds')
         playSound('success')
