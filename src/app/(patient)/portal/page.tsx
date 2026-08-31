@@ -6,6 +6,7 @@ import { getMyPortalStatus, getMyDisplayName } from '@/features/portal/actions'
 import { listMyFamilyPatientCards } from '@/features/access-grants/actions'
 import PatientPortalHome from '@/components/patient-portal-home'
 import type { FamilyPatientCard } from '@/components/patient-portal-home'
+import { Skeleton } from '@/components/ui/skeleton'
 
 export default function PortalPage() {
   const router = useRouter()
@@ -65,12 +66,38 @@ export default function PortalPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="text-center">
-          <div className="inline-flex h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
-          <p className="mt-4 text-sm text-muted-foreground">Loading your portal...</p>
+      <main className="mx-auto max-w-5xl px-4 py-6">
+        {/* Greeting */}
+        <div className="mb-8">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="mt-2 h-4 w-40" />
         </div>
-      </div>
+
+        {/* My Clinics */}
+        <div>
+          <div className="mb-4">
+            <Skeleton className="h-6 w-28" />
+            <Skeleton className="mt-2 h-4 w-56" />
+          </div>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex h-full min-h-[160px] flex-col justify-between rounded-xl border border-border p-6"
+              >
+                <div>
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <Skeleton className="h-6 w-32" />
+                    <Skeleton className="size-5 shrink-0 rounded" />
+                  </div>
+                  <Skeleton className="h-4 w-24" />
+                </div>
+                <Skeleton className="mt-4 h-3 w-28" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
     )
   }
 
