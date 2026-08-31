@@ -33,6 +33,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Card } from '@/components/ui/card'
+import DocumentDownloadButton from '@/components/document-download-button'
 import type { PortalCardDetail } from '@/features/portal/types'
 import { calculateAge } from '@/features/patients/types'
 
@@ -64,17 +65,6 @@ const formatDate = (isoString: string): string => {
 const getReceiptHref = (paymentId: string): string => {
   const segments = ['', 'api', 'payments', paymentId, 'receipt']
   return segments.join('/')
-}
-
-// Opens the receipt PDF in a new tab. Deliberately NOT a literal <a> tag —
-// three prior attempts using an anchor element all failed to survive
-// copy-paste intact, with the opening "<a" token itself vanishing while
-// every attribute and the closing "</a>" remained, producing cascading
-// JSX parse errors. A native <button> with window.open() achieves the
-// same "open in new tab" behavior without emitting that token at all.
-const openReceipt = (paymentId: string) => {
-  const href = getReceiptHref(paymentId)
-  window.open(href, '_blank', 'noopener,noreferrer')
 }
 
 const getBadgeClassesBySeverity = (severity: string): string => {
@@ -146,9 +136,6 @@ const RecordsTabContent = ({
 
   return (
     <div className="space-y-4">
-      {/* Item 3b: caption clarifying that treatment detail depth is
-          doctor-dependent, not a system limitation. Sits above the
-          accordion, applies to every encounter in this tab. */}
       <p className="text-xs text-muted-foreground">
         Details below are entered by your treating doctor and may not include every minor detail from your visit.
       </p>
@@ -413,14 +400,14 @@ const PaymentsTabContent = ({
               </div>
             </div>
             {pay.approvalStatus === 'approved' && (
-              <button
-                type="button"
-                onClick={() => openReceipt(pay.id)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border py-2 text-xs font-medium text-primary hover:bg-muted transition-colors"
+              <DocumentDownloadButton
+                href={getReceiptHref(pay.id)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border py-2 text-xs font-medium text-primary hover:bg-muted transition-colors disabled:opacity-60"
+                loadingLabel="Generating…"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden="true" />
                 Download Receipt
-              </button>
+              </DocumentDownloadButton>
             )}
           </Card>
         ))}
@@ -465,15 +452,15 @@ const PaymentsTabContent = ({
                 </TableCell>
                 <TableCell className="text-right">
                   {pay.approvalStatus === 'approved' ? (
-                    <button
-                      type="button"
-                      onClick={() => openReceipt(pay.id)}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                      aria-label="Download payment receipt"
+                    <DocumentDownloadButton
+                      href={getReceiptHref(pay.id)}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-60"
+                      ariaLabel="Download payment receipt"
+                      loadingLabel="Generating…"
                     >
                       <Download className="h-3.5 w-3.5" aria-hidden="true" />
                       Download
-                    </button>
+                    </DocumentDownloadButton>
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
                   )}

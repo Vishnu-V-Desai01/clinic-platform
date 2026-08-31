@@ -10,6 +10,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import EditBillDialog from '@/features/payments/components/edit-bill-dialog-client';
+import DocumentDownloadButton from '@/components/document-download-button';
 import type { PaymentLineItem } from '@/features/payments/types';
 
 function formatINR(amount: number): string {
@@ -120,7 +121,7 @@ export default async function PaymentDetailPage({
           ) : null}
         </div>
 
-        {/* ── Summary ──────────────────────────────────────────── */}
+        {/* ── Summary ──────────────────────────────────────────────── */}
         <Card className="bg-card border-border p-6 space-y-5">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">Status</p>
@@ -182,18 +183,18 @@ export default async function PaymentDetailPage({
 
           {isApproved ? (
             <div className="pt-2 border-t border-border">
-              <Link
+              <DocumentDownloadButton
                 href={receiptUrl}
-                target="_blank"
-                className="text-sm text-primary hover:underline"
+                className="text-sm text-primary hover:underline disabled:opacity-60"
+                loadingLabel="Generating receipt…"
               >
                 Download Receipt (PDF)
-              </Link>
+              </DocumentDownloadButton>
             </div>
           ) : null}
         </Card>
 
-        {/* ── Bill Breakdown ────────────────────────────────────── */}
+        {/* ── Bill Breakdown ───────────────────────────────────────── */}
         <Card className="bg-card border-border p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Bill Breakdown</h2>
@@ -266,7 +267,7 @@ export default async function PaymentDetailPage({
           )}
         </Card>
 
-        {/* ── Collection history ───────────────────────────────── */}
+        {/* ── Collection history ───────────────────────────────────── */}
         {collections.length > 0 ? (
           <Card className="bg-card border-border p-6">
             <h2 className="text-base font-semibold text-foreground mb-4">
@@ -297,7 +298,7 @@ export default async function PaymentDetailPage({
           </Card>
         ) : null}
 
-        {/* ── Documents ────────────────────────────────────────── */}
+        {/* ── Documents ────────────────────────────────────────────── */}
         <Card className="bg-card border-border p-6">
           <div className="flex items-center gap-3 mb-5">
             <div className="bg-primary/10 text-primary rounded-lg p-2">
@@ -315,14 +316,14 @@ export default async function PaymentDetailPage({
                     Itemised fee breakdown and collection history
                   </p>
                 </div>
-                <Link
+                <DocumentDownloadButton
                   href={receiptUrl}
-                  target="_blank"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-60"
+                  loadingLabel="Generating…"
                 >
                   <Download className="w-4 h-4" />
                   Download
-                </Link>
+                </DocumentDownloadButton>
               </div>
               <div className="flex items-center justify-between border border-border rounded-lg p-4 bg-background">
                 <div>
@@ -331,14 +332,14 @@ export default async function PaymentDetailPage({
                     Patient history, diagnoses and prescriptions
                   </p>
                 </div>
-                <Link
+                <DocumentDownloadButton
                   href={treatmentUrl}
-                  target="_blank"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-60"
+                  loadingLabel="Generating…"
                 >
                   <Download className="w-4 h-4" />
                   Download
-                </Link>
+                </DocumentDownloadButton>
               </div>
             </div>
           ) : (

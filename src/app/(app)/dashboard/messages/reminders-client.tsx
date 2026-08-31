@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Check, CalendarClock, Send, ChevronDown, Info, X } from "lucide-react";
+import { Check, CalendarClock, Send, ChevronDown, Info, X, Loader2 } from "lucide-react";
 import {
   sendMessage,
   sendAllMessages,
@@ -87,14 +87,16 @@ export function RemindersClient({
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Scoped per-action loading state so clicking one card's Send/Cancel only
+  // shows "Sending…"/"Cancelling…" on that specific button, not a global
+  // freeze across every card in the list.
+  const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
+  const [cancellingMessageId, setCancellingMessageId] = useState<string | null>(null);
+
   const overageCount = Math.max(0, messagesSent - includedLimit);
   const overageRupees = ((overageCount * overageRatePaise) / 100).toLocaleString("en-IN", {
     maximumFractionDigits: 2,
   });
-  // Per-message overage rate, formatted for the info banner below. Was
-  // previously a hardcoded "₹1.50" string that ignored this prop entirely —
-  // now it actually reflects overageRatePaise, so a future pricing change
-  // only needs the constants module / DB default updated, not this file.
   const overageRateRupees = (overageRatePaise / 100).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -103,23 +105,27 @@ export function RemindersClient({
   const isOverage = messagesSent > includedLimit;
 
   const handleSend = (messageId: string) => {
+    setSendingMessageId(messageId);
     startTransition(async () => {
       setErrorMessage(null);
       const result = await sendMessage({ messageId });
       if (!result.success) {
         setErrorMessage(result.error ?? "Failed to send message");
       }
+      setSendingMessageId(null);
       router.refresh();
     });
   };
 
   const handleCancel = (messageId: string) => {
+    setCancellingMessageId(messageId);
     startTransition(async () => {
       setErrorMessage(null);
       const result = await cancelMessage({ messageId });
       if (!result.success) {
         setErrorMessage(result.error ?? "Failed to cancel message");
       }
+      setCancellingMessageId(null);
       router.refresh();
     });
   };
@@ -198,44 +204,61 @@ export function RemindersClient({
                 <p className="text-sm text-muted-foreground">No messages ready to send.</p>
               </Card>
             ) : (
-              ready.map((msg) => (
-                <Card
-                  key={msg.id}
-                  className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-                >
-                  <div className="flex-1 space-y-2 min-w-0">
-                    <p className="font-medium text-foreground truncate">{msg.patientName}</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <TypeBadge type={msg.type as "registration" | "receipt" | "appointment"} />
-                      <span className="text-sm text-muted-foreground">{msg.phone}</span>
+              ready.map((msg) => {
+                const isSending = sendingMessageId === msg.id;
+                const isCancelling = cancellingMessageId === msg.id;
+                return (
+                  <Card
+                    key={msg.id}
+                    className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                  >
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <p className="font-medium text-foreground truncate">{msg.patientName}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TypeBadge type={msg.type as "registration" | "receipt" | "appointment"} />
+                        <span className="text-sm text-muted-foreground">{msg.phone}</span>
+                      </div>
+                      <Badge variant="secondary" className="text-xs border-0">
+                        {msg.language}
+                      </Badge>
                     </div>
-                    <Badge variant="secondary" className="text-xs border-0">
-                      {msg.language}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleSend(msg.id)}
-                      disabled={isPending}
-                      className="border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
-                    >
-                      <Send className="w-3.5 h-3.5 mr-1" />
-                      Send
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleCancel(msg.id)}
-                      disabled={isPending}
-                      aria-label={`Cancel message for ${msg.patientName}`}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </Card>
-              ))
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSend(msg.id)}
+                        disabled={isPending}
+                        className="border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
+                      >
+                        {isSending ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                            Sending…
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5 mr-1" />
+                            Send
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCancel(msg.id)}
+                        disabled={isPending}
+                        aria-label={`Cancel message for ${msg.patientName}`}
+                      >
+                        {isCancelling ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <X className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })
             )}
           </div>
         </div>
@@ -258,35 +281,45 @@ export function RemindersClient({
                 </p>
               </Card>
             ) : (
-              scheduled.map((reminder) => (
-                <Card
-                  key={reminder.id}
-                  className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-                >
-                  <div className="flex-1 space-y-2 min-w-0">
-                    <p className="font-medium text-foreground truncate">{reminder.patientName}</p>
-                    <Badge className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border-0">
-                      Appointment
-                    </Badge>
-                    <p className="text-sm text-muted-foreground">{reminder.doctorName}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {reminder.appointmentDate} · {reminder.appointmentTime}
-                    </p>
-                  </div>
-                  <div className="flex flex-col sm:items-end gap-3 shrink-0">
-                    <span className="text-xs text-muted-foreground">Sends at 4:30 AM</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleCancel(reminder.id)}
-                      disabled={isPending}
-                      aria-label={`Cancel reminder for ${reminder.patientName}`}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </Card>
-              ))
+              scheduled.map((reminder) => {
+                const isCancelling = cancellingMessageId === reminder.id;
+                return (
+                  <Card
+                    key={reminder.id}
+                    className="p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                  >
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <p className="font-medium text-foreground truncate">{reminder.patientName}</p>
+                      <Badge className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border-0">
+                        Appointment
+                      </Badge>
+                      <p className="text-sm text-muted-foreground">{reminder.doctorName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {reminder.appointmentDate} · {reminder.appointmentTime}
+                      </p>
+                    </div>
+                    <div className="flex flex-col sm:items-end gap-3 shrink-0">
+                      <span className="text-xs text-muted-foreground">Sends at 4:30 AM</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCancel(reminder.id)}
+                        disabled={isPending}
+                        aria-label={`Cancel reminder for ${reminder.patientName}`}
+                      >
+                        {isCancelling ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                            Cancelling…
+                          </>
+                        ) : (
+                          "Cancel"
+                        )}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })
             )}
           </div>
         </div>

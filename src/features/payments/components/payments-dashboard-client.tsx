@@ -27,6 +27,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Download, Search, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import RecordPaymentDialog from './record-payment-dialog-client';
 import NewChargeDialog from './new-charge-dialog-client';
+import DocumentDownloadButton from '@/components/document-download-button';
 import type {
   PaymentDashboardRow,
   PaymentDashboardMetrics,
@@ -158,11 +159,6 @@ export default function PaymentsDashboardClient({
   const handleCollect = (id: string) => {
     setPreselectedChargeId(id);
     setRecordDialogOpen(true);
-  };
-
-  // Direct API route — no storage bucket needed
-  const handleDownloadReceipt = (id: string) => {
-    window.open('/api/payments/' + id + '/receipt', '_blank');
   };
 
   return (
@@ -393,13 +389,14 @@ export default function PaymentsDashboardClient({
                           </TableCell>
                           <TableCell className="text-center">
                             {payment.hasReceipt ? (
-                              <button
-                                onClick={() => handleDownloadReceipt(payment.id)}
-                                className="inline-flex items-center justify-center p-1 rounded hover:bg-muted text-foreground"
-                                aria-label="Download receipt"
+                              <DocumentDownloadButton
+                                href={`/api/payments/${payment.id}/receipt`}
+                                className="inline-flex items-center justify-center p-1 rounded hover:bg-muted text-foreground disabled:opacity-60"
+                                ariaLabel="Download receipt"
+                                iconOnly
                               >
                                 <Download className="w-4 h-4" />
-                              </button>
+                              </DocumentDownloadButton>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
