@@ -8,12 +8,16 @@
 // Price uses plain "₹" + toFixed(2) formatting, not the project's shared
 // formatINR() helper — that file's import path wasn't available when this
 // was written. Functionally correct; swap in formatINR() once confirmed.
+//
+// Step C: header + card typography moved onto the shared curakin-h1/
+// curakin-card-flat classes; status badge colours moved onto the shared
+// --status-warning/--status-danger tokens instead of hardcoded Tailwind
+// amber/destructive classes (same visual result, centrally defined now).
 
 import { useMemo, useState } from 'react'
 import { CalendarClock, IndianRupee, Package, PackageX, Pencil, Plus, Search, TriangleAlert } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -76,9 +80,9 @@ const seedDrugs: DrugRow[] = [
 
 const statusMeta: Record<DrugStatus, { label: string; icon?: typeof TriangleAlert; className?: string }> = {
   ok: { label: 'OK' },
-  low: { label: 'Low stock', icon: TriangleAlert, className: 'bg-amber-500/15 text-amber-700 dark:text-amber-400' },
-  expiring_soon: { label: 'Expiring soon', icon: CalendarClock, className: 'bg-amber-500/15 text-amber-700 dark:text-amber-400' },
-  expired: { label: 'Expired', icon: PackageX, className: 'bg-destructive/15 text-destructive' },
+  low: { label: 'Low stock', icon: TriangleAlert, className: 'bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]' },
+  expiring_soon: { label: 'Expiring soon', icon: CalendarClock, className: 'bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]' },
+  expired: { label: 'Expired', icon: PackageX, className: 'bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]' },
   not_stocked: { label: 'Not stocked', icon: Package, className: 'bg-muted text-muted-foreground' },
 }
 
@@ -144,11 +148,11 @@ export default function PharmacyInventory({
   }
 
   return (
-    <main className="min-h-full bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
+    <main className="curakin-preview min-h-full bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
+            <h1 className="curakin-h1">Inventory</h1>
             <p className="text-sm text-muted-foreground">Manage your pharmacy&apos;s drug catalogue and stock.</p>
           </div>
           <Button onClick={() => setOpen(true)} className="w-full sm:w-auto"><Plus className="mr-2 size-4" aria-hidden="true" />Add drug</Button>
@@ -172,8 +176,8 @@ export default function PharmacyInventory({
           </Select>
         </div>
 
-        <Card className="overflow-hidden">
-          <CardContent className="p-0">
+        <div className="curakin-card-flat overflow-hidden rounded-xl">
+          <div>
             {drugs.length === 0 ? (
               <div className="flex min-h-72 flex-col items-center justify-center gap-4 px-6 text-center"><PackageX className="size-8 text-muted-foreground" /><div className="flex flex-col gap-1"><h2 className="font-medium">Your drug catalogue is empty</h2><p className="text-sm text-muted-foreground">Add medicines to start managing pharmacy stock.</p></div><Button onClick={() => setOpen(true)}>Add your first drug</Button></div>
             ) : filteredDrugs.length === 0 ? (
@@ -248,7 +252,7 @@ export default function PharmacyInventory({
                           </TableCell>
                           <TableCell>{drug.reorderThreshold ?? '—'}</TableCell>
                           <TableCell className="whitespace-nowrap">{drug.expiryDate ? dateFormatter.format(new Date(drug.expiryDate)) : '—'}</TableCell>
-                          <TableCell><Badge variant={drug.status === 'ok' ? 'secondary' : 'outline'} className={cn('gap-1 whitespace-nowrap', meta.className)}>{Icon && <Icon aria-hidden="true" />}{meta.label}</Badge></TableCell>
+                          <TableCell><Badge variant={drug.status === 'ok' ? 'secondary' : 'outline'} className={cn('gap-1 whitespace-nowrap border-transparent', meta.className)}>{Icon && <Icon aria-hidden="true" />}{meta.label}</Badge></TableCell>
                         </TableRow>
                       )
                     })}
@@ -256,8 +260,8 @@ export default function PharmacyInventory({
                 </Table>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

@@ -66,7 +66,7 @@ export default function PortalPage() {
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-5xl px-4 py-6">
+      <main className="curakin-preview mx-auto max-w-5xl bg-background px-4 py-6">
         {/* Greeting */}
         <div className="mb-8">
           <Skeleton className="h-8 w-64" />
@@ -83,7 +83,7 @@ export default function PortalPage() {
             {Array.from({ length: 3 }).map((_, i) => (
               <div
                 key={i}
-                className="flex h-full min-h-[160px] flex-col justify-between rounded-xl border border-border p-6"
+                className="curakin-card-flat flex h-full min-h-[160px] flex-col justify-between rounded-xl p-6"
               >
                 <div>
                   <div className="mb-3 flex items-start justify-between gap-2">

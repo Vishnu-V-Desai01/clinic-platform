@@ -35,10 +35,10 @@ export default function PatientPortalHome({
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6">
+    <main className="curakin-preview mx-auto max-w-5xl bg-background px-4 py-6">
       {/* Greeting Section */}
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-foreground">
+        <h1 className="curakin-h1">
           Welcome back{firstName ? `, ${firstName}` : ''}
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -49,7 +49,7 @@ export default function PatientPortalHome({
       {/* My Clinics Section */}
       <div>
         <div className="mb-4">
-          <h2 className="text-lg font-semibold text-foreground">My Clinics</h2>
+          <h2 className="curakin-h2">My Clinics</h2>
           <p className="text-sm text-muted-foreground">
             Your registered patient cards across clinics
           </p>
@@ -82,7 +82,7 @@ export default function PatientPortalHome({
                 className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 rounded-xl transition-all"
                 aria-label={`Open ${card.clinicName || 'clinic'} patient card`}
               >
-                <Card className="flex h-full min-h-[160px] flex-col justify-between rounded-xl border border-border p-6 transition-colors hover:border-primary">
+                <Card className="curakin-card-flat flex h-full min-h-[160px] flex-col justify-between rounded-xl p-6 transition-shadow hover:shadow-md">
                   <div>
                     <div className="mb-3 flex items-start justify-between gap-2">
                       <h3 className="text-xl font-semibold text-primary">
