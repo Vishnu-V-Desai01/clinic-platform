@@ -1,22 +1,24 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { currentUser } from '@clerk/nextjs/server'
 import AdminBillingSettings from '@/features/billing/components/AdminBillingSettings'
 import { redirect } from 'next/navigation'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata = {
   title: 'Billing & Subscriptions',
+  description: 'Manage your subscription, view invoices, and update billing details.',
 }
 
 export default async function BillingPage() {
-  const supabase = createServerSupabaseClient()
-
-  // Get current user
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Get current user from Clerk
+  const user = await currentUser()
 
   if (!user) {
     redirect('/sign-in')
   }
+
+  const supabase = createServerSupabaseClient()
 
   // Get user's profile and clinic
   const { data: profile } = await supabase
