@@ -54,6 +54,12 @@ interface AdminBillingSettingsProps {
   invoices?: Invoice[]
 }
 
+interface TierDisplay {
+  name: string
+  doctorLimit: string
+  description?: string
+}
+
 // Pricing (in paise)
 const PRICING_PER_YEAR_PAISE: Record<SubscriptionTier | 'enterprise', number> = {
   solo: 1_400_000, // ₹14,000
@@ -70,14 +76,7 @@ const TERM_CONFIG: Record<SubscriptionTerm, { years: number; discount: number }>
 }
 
 // Tier metadata
-const TIER_DISPLAY: Record
-  SubscriptionTier | 'enterprise',
-  {
-    name: string
-    doctorLimit: string
-    description?: string
-  }
-> = {
+const TIER_DISPLAY: Record<SubscriptionTier | 'enterprise', TierDisplay> = {
   solo: {
     name: 'Solo',
     doctorLimit: '1 doctor',
@@ -214,7 +213,11 @@ export default function AdminBillingSettings({
                   Subscription Active
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Current plan: <span className="font-medium">{TIER_DISPLAY[subscription.tier as SubscriptionTier].name}</span> ({subscription.term})
+                  Current plan:{' '}
+                  <span className="font-medium">
+                    {TIER_DISPLAY[subscription.tier as SubscriptionTier].name}
+                  </span>{' '}
+                  ({subscription.term})
                   · Renews {formatDate(subscription.renewsAt)}
                 </p>
               </div>
