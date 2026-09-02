@@ -3,23 +3,37 @@
 import { redirect } from 'next/navigation'
 import { createClinicAndBecomeAdmin, requireRole } from '@/lib/supabase/profile'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { createClinicSchema } from './schema'
+import { createClinicSchema, type CreateClinicInput } from './schema'
+import { TOS_VERSION } from './legal-content'
 
 type ActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string }
 
 export async function createClinicOnboardingAction(
-  clinicName: string
+  input: CreateClinicInput
 ): Promise<ActionResult<null>> {
-  const parsed = createClinicSchema.safeParse({ clinicName })
+  const parsed = createClinicSchema.safeParse(input)
 
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' }
   }
 
   try {
-    await createClinicAndBecomeAdmin(parsed.data.clinicName)
+    await createClinicAndBecomeAdmin({
+      clinicName: parsed.data.clinicName,
+      fullNameOverride: parsed.data.fullName,
+      phone: parsed.data.phone || null,
+      contactEmail: parsed.data.email || null,
+      address: parsed.data.address || null,
+      city: parsed.data.city || null,
+      state: parsed.data.state || null,
+      postalCode: parsed.data.postalCode || null,
+      licenseNumber: parsed.data.licenseNumber || null,
+      gstNumber: parsed.data.gstNumber || null,
+      hfrId: parsed.data.hfrId || null,
+      tosVersion: TOS_VERSION,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to create clinic'
     return { success: false, error: message }

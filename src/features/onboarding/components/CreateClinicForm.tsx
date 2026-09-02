@@ -3,15 +3,20 @@
 import { useState, useTransition } from 'react'
 import { createClinicOnboardingAction } from '../actions'
 import ClinicOnboardingScreen from './ClinicOnboardingScreen'
+import type { CreateClinicInput } from '../schema'
 
-export function CreateClinicForm() {
+interface CreateClinicFormProps {
+  defaultFullName?: string
+}
+
+export function CreateClinicForm({ defaultFullName = '' }: CreateClinicFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  function handleSubmit(clinicName: string) {
+  function handleSubmit(data: CreateClinicInput) {
     setError(null)
     startTransition(async () => {
-      const result = await createClinicOnboardingAction(clinicName)
+      const result = await createClinicOnboardingAction(data)
       if (result && !result.success) {
         setError(result.error)
       }
@@ -20,6 +25,11 @@ export function CreateClinicForm() {
   }
 
   return (
-    <ClinicOnboardingScreen onSubmit={handleSubmit} isLoading={isPending} error={error} />
+    <ClinicOnboardingScreen
+      onSubmit={handleSubmit}
+      isLoading={isPending}
+      error={error}
+      defaultFullName={defaultFullName}
+    />
   )
 }

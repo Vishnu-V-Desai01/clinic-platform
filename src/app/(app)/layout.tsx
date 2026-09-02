@@ -14,7 +14,15 @@ export default async function AppLayout({
   children: React.ReactNode
 }) {
   const profile = await getOrCreateProfile()
-  if (!profile) redirect('/sign-in')
+  // An authenticated user with no profile is either mid-onboarding (new
+  // doctor who hasn't created a clinic yet) or a patient who landed here
+  // by mistake. '/' already contains the correct routing for both cases
+  // (see RootPage: patient-email check, then CreateClinicForm). Sending
+  // them to '/sign-in' instead was wrong — they're already signed in, so
+  // Clerk's fallbackRedirectUrl bounces them straight back to /dashboard,
+  // which has no profile, which redirects to /sign-in again: an infinite
+  // loop. This was the root cause of today's stuck sign-up/sign-in screens.
+  if (!profile) redirect('/')
   // Patients have a separate shell — never enter the clinical (app) group.
   if (profile.role === 'patient') redirect('/portal')
 

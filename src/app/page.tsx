@@ -12,7 +12,6 @@ export default async function RootPage() {
     }
     redirect('/dashboard')
   }
-
   // Security hardening: an authenticated user with no profile normally
   // means "new doctor setting up a clinic" — but it's also exactly what
   // a patient looks like if a sign-up redirect ever misroutes them here
@@ -27,7 +26,6 @@ export default async function RootPage() {
     user = null
   }
   const verifiedEmail = user?.emailAddresses[0]?.emailAddress
-
   if (verifiedEmail) {
     const supabase = createServerSupabaseClient()
     const { data: isPatientEmail } = await supabase.rpc(
@@ -39,5 +37,12 @@ export default async function RootPage() {
     }
   }
 
-  return <CreateClinicForm />
+  // Pre-fills the "your name" field when Clerk already has it (e.g. Google
+  // sign-up). Email/password sign-ups get an empty field and must type it
+  // once — Clerk doesn't collect a name for that method.
+  const defaultFullName = user?.firstName
+    ? `${user.firstName} ${user.lastName ?? ''}`.trim()
+    : ''
+
+  return <CreateClinicForm defaultFullName={defaultFullName} />
 }
