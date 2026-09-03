@@ -1,14 +1,16 @@
 // src/app/api/cron/send-medicine-reminders/route.ts
 //
-// Called every minute by Vercel Cron once vercel.json's cron config is
-// added (deferred until Vercel Pro is purchased — see project notes,
-// blocker B: a crons block in vercel.json fails the build on Hobby).
-// Until then, this route is only reachable by manual trigger — either a
-// direct authenticated hit with the x-cron-secret header, or the
-// admin-only "Run now" button on the Settings page (see
-// src/features/reminders/manual-trigger-actions.ts, which calls the
-// shared sendDueMedicineReminders() function directly rather than
-// through this HTTP route, so it doesn't need the cron secret).
+// Called every minute by Vercel Cron via vercel.json's crons block.
+// Vercel's native cron scheduler authenticates itself by sending
+// `Authorization: Bearer $CRON_SECRET` on every invocation — this route
+// checks for that exact header. (Previously guarded by a custom
+// `x-cron-secret` header for manual/pre-Pro testing; switched over now
+// that vercel.json's crons block is live and Vercel is the real caller.)
+//
+// The admin "Run now" button (src/features/reminders/manual-trigger-actions.ts)
+// does NOT go through this route at all — it calls sendDueMedicineReminders()
+// directly, gated by Clerk admin auth instead of the cron secret. So this
+// change only affects the cron path, not the manual trigger.
 //
 // All actual send logic lives in sendDueMedicineReminders() —
 // src/lib/medicine-reminders/send-due-reminders.ts — this route is only
@@ -20,8 +22,10 @@ import { sendDueMedicineReminders } from '@/lib/medicine-reminders/send-due-remi
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const secret = request.headers.get('x-cron-secret')
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  const authHeader = request.headers.get('authorization')
+  const expected = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : null
+
+  if (!expected || authHeader !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
