@@ -31,8 +31,24 @@
 // minute for the rest of the day, relying ENTIRELY on the last_sent_at
 // check to prevent duplicate sends instead of the query itself scoping
 // correctly).
+//
+// CONCURRENCY FIX (Chat 24C idempotency audit): the original flow was
+// "query due rows -> send -> mark last_sent_at on success." That has a
+// race window: if two invocations overlap (e.g. a cron tick fires while
+// someone clicks "Run Now"), both can read the same rows as due BEFORE
+// either one's UPDATE lands, and both send.
+//
+// Fixed with an atomic claim-then-send pattern: each row is claimed via
+// a compare-and-swap UPDATE (`SET last_sent_at = now() WHERE id = X AND
+// last_sent_at IS <the value we just read>`), and only rows we actually
+// won the claim on get sent. Postgres serializes concurrent UPDATEs on
+// the same row: the second transaction's WHERE clause re-evaluates
+// after the first commits, sees last_sent_at has changed, and matches
+// zero rows — so only one caller can ever claim a given row. If the
+// send itself fails after a successful claim, the claim is rolled back
+// to its pre-claim value so the next tick retries that dose.
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getMessageProvider } from '@/features/messaging/providers'
 
 // English-only, per Item 4's explicit design decision.
@@ -93,6 +109,65 @@ function extractPatientId(row: DueReminderRow): string | undefined {
   return Array.isArray(cp) ? cp[0]?.patient_id : cp.patient_id
 }
 
+/**
+ * Atomically claims a single reminder row: sets last_sent_at to `nowIso`
+ * ONLY if it still equals the value we originally read (`previousValue`).
+ * Returns true if this call won the claim, false if someone else already
+ * claimed it (or the row no longer matches for any other reason).
+ */
+async function claimRow(
+  supabase: SupabaseClient,
+  rowId: string,
+  previousValue: string | null,
+  nowIso: string,
+): Promise<boolean> {
+  let query = supabase
+    .from('care_plan_reminders')
+    .update({ last_sent_at: nowIso })
+    .eq('id', rowId)
+
+  query = previousValue === null
+    ? query.is('last_sent_at', null)
+    : query.eq('last_sent_at', previousValue)
+
+  const { data, error } = await query.select('id')
+
+  if (error) {
+    console.error(`[sendDueMedicineReminders] claim error for row ${rowId}:`, error)
+    return false
+  }
+
+  return (data?.length ?? 0) > 0
+}
+
+/**
+ * Rolls back a previously-claimed row to its pre-claim value. Called
+ * when a claim succeeded but the subsequent send failed, so the row is
+ * eligible to be picked up and retried on the next tick.
+ */
+async function rollbackClaim(
+  supabase: SupabaseClient,
+  rowId: string,
+  previousValue: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('care_plan_reminders')
+    .update({ last_sent_at: previousValue })
+    .eq('id', rowId)
+
+  if (error) {
+    // This is a genuine problem: the row stays claimed (marked sent)
+    // despite never actually sending, so it silently skips future
+    // ticks until last_sent_at's date rolls over. Logged loudly so
+    // Sentry/console surfaces it — this needs human eyes, not a retry.
+    console.error(
+      `[sendDueMedicineReminders] ROLLBACK FAILED for row ${rowId} — ` +
+      `row will be stuck as claimed-but-unsent until next day's reset:`,
+      error,
+    )
+  }
+}
+
 export type SendDueRemindersResult = {
   sent: number
   failed: number
@@ -104,10 +179,12 @@ export type SendDueRemindersResult = {
 
 /**
  * Finds medicine reminders due at the current IST minute, groups them by
- * (patient, reminder_time) into one WhatsApp message per group, sends via
- * the active message provider, and stamps last_sent_at on every row in a
- * successfully-sent group. Safe to call repeatedly — rows already sent
- * today are skipped.
+ * (patient, reminder_time) into one WhatsApp message per group, claims
+ * each row atomically before sending, sends via the active message
+ * provider, and rolls back the claim on send failure so the row can be
+ * retried. Safe to call repeatedly and safe to call concurrently — the
+ * per-row compare-and-swap claim means overlapping invocations can never
+ * both send the same dose.
  */
 export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult> {
   const supabase = createClient(
@@ -163,13 +240,18 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
     return { sent: 0, failed: 0, groupedMessageCount: 0, reminderRowCount: 0, currentTime }
   }
 
+  type ReminderGroupRow = {
+    id: string
+    medicineName: string
+    mealAssociation: string | null
+    previousLastSentAt: string | null
+  }
+
   type ReminderGroup = {
     patientId: string
     clinicId: string
     reminderTime: string
-    rowIds: string[]
-    medicines: string[]
-    mealAssociations: Set<string | null>
+    rows: ReminderGroupRow[]
   }
 
   const groups = new Map<string, ReminderGroup>()
@@ -183,20 +265,22 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
     }
 
     const key = `${patientId}::${row.reminder_time}`
-    const existing = groups.get(key)
+    const groupRow: ReminderGroupRow = {
+      id: row.id,
+      medicineName: String(row.medicine_name),
+      mealAssociation: row.meal_association,
+      previousLastSentAt: row.last_sent_at,
+    }
 
+    const existing = groups.get(key)
     if (existing) {
-      existing.rowIds.push(row.id)
-      existing.medicines.push(String(row.medicine_name))
-      existing.mealAssociations.add(row.meal_association)
+      existing.rows.push(groupRow)
     } else {
       groups.set(key, {
         patientId,
         clinicId: row.clinic_id,
         reminderTime: String(row.reminder_time),
-        rowIds: [row.id],
-        medicines: [String(row.medicine_name)],
-        mealAssociations: new Set([row.meal_association]),
+        rows: [groupRow],
       })
     }
   }
@@ -204,11 +288,36 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
   console.log(`[sendDueMedicineReminders] Grouped into ${groups.size} message(s), ${unattributedFailures} unattributed row(s)`)
 
   const provider = getMessageProvider()
+  const nowIso   = new Date().toISOString()
   let   sent     = 0
   let   failed   = unattributedFailures
   const errors: string[] = []
 
   for (const group of groups.values()) {
+    // Claim every row in this group atomically, in parallel. Only rows
+    // we actually win get sent — a row already claimed by a concurrent
+    // invocation (overlapping cron tick, or a manual "Run Now" click)
+    // simply won't be part of the outgoing message.
+    const claimResults = await Promise.all(
+      group.rows.map(async (row) => ({
+        row,
+        claimed: await claimRow(supabase, row.id, row.previousLastSentAt, nowIso),
+      })),
+    )
+
+    const claimedRows = claimResults.filter((r) => r.claimed).map((r) => r.row)
+
+    if (claimedRows.length === 0) {
+      // Every row in this group was already claimed by another
+      // invocation between our query and our claim attempt. Nothing to
+      // do — not a failure, just a benign race we lost gracefully.
+      console.log(
+        `[sendDueMedicineReminders] group ${group.patientId}@${group.reminderTime} — ` +
+        `all rows already claimed elsewhere, skipping`
+      )
+      continue
+    }
+
     try {
       const [patientRes, clinicRes] = await Promise.all([
         supabase
@@ -226,6 +335,10 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
       if (patientRes.error || !patientRes.data?.phone) {
         failed++
         errors.push(`No phone for patient ${group.patientId}`)
+        // Roll back every row we claimed — we never actually sent.
+        await Promise.all(
+          claimedRows.map((row) => rollbackClaim(supabase, row.id, row.previousLastSentAt)),
+        )
         continue
       }
 
@@ -237,11 +350,10 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
         : `91${patient.phone}`
       const name = `${patient.first_name ?? ''} ${patient.last_name ?? ''}`.trim()
 
-      const medicineList = group.medicines.join(', ')
+      const medicineList = claimedRows.map((r) => r.medicineName).join(', ')
 
-      const singleMeal = group.mealAssociations.size === 1
-        ? [...group.mealAssociations][0]
-        : null
+      const mealAssociations = new Set(claimedRows.map((r) => r.mealAssociation))
+      const singleMeal = mealAssociations.size === 1 ? [...mealAssociations][0] : null
       const timing = formatTiming(singleMeal, group.reminderTime)
 
       const result = await provider.sendTemplateMessage({
@@ -252,25 +364,32 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
       })
 
       if (result.success) {
-        await supabase
-          .from('care_plan_reminders')
-          .update({ last_sent_at: new Date().toISOString() })
-          .in('id', group.rowIds)
-
+        // Rows are already marked sent (the claim IS the mark) — nothing
+        // further to write.
         sent++
         console.log(
-          `[sendDueMedicineReminders] ✓ sent grouped reminder (${group.rowIds.length} medicine(s))` +
+          `[sendDueMedicineReminders] ✓ sent grouped reminder (${claimedRows.length} medicine(s))` +
           ` — ${medicineList} → ${phone}`
         )
       } else {
         failed++
         errors.push(`group ${group.patientId}@${group.reminderTime}: ${result.errorMessage}`)
         console.error(`[sendDueMedicineReminders] ✗ failed:`, result.errorMessage)
+        // Send failed after a successful claim — roll back so this
+        // dose is retried next tick instead of silently skipped.
+        await Promise.all(
+          claimedRows.map((row) => rollbackClaim(supabase, row.id, row.previousLastSentAt)),
+        )
       }
     } catch (err) {
       failed++
       errors.push(`error on group ${group.patientId}@${group.reminderTime}: ${String(err)}`)
       console.error('[sendDueMedicineReminders] unexpected error:', err)
+      // Unknown failure after claiming — same rollback logic applies so
+      // we don't lose the dose silently.
+      await Promise.all(
+        claimedRows.map((row) => rollbackClaim(supabase, row.id, row.previousLastSentAt)),
+      )
     }
   }
 
