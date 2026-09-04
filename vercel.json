@@ -4,8 +4,5 @@
       "path": "/api/cron/send-medicine-reminders",
       "schedule": "* * * * *"
     }
-  ],
-  "skewProtection": {
-    "ttl": 300
-  }
+  ]
 }
