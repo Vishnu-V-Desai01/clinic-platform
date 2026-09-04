@@ -47,9 +47,32 @@
 // zero rows — so only one caller can ever claim a given row. If the
 // send itself fails after a successful claim, the claim is rolled back
 // to its pre-claim value so the next tick retries that dose.
+//
+// DPDP CONSENT GATE (audit fix, Chat "DPDP consent debugging"): this
+// path previously sent medicine reminders with NO consent check
+// whatsoever — a patient revoking any consent purpose in the portal,
+// including WhatsApp notifications entirely, had zero effect on medicine
+// reminders continuing to arrive. Fixed by checking the
+// 'medication_reminders' purpose specifically (not the broader
+// 'whatsapp_notifications' — these are deliberately separate toggles in
+// the portal UI; a patient can keep general WhatsApp notifications on
+// while turning off medication reminders specifically) via
+// hasActiveConsentService, the session-free counterpart to
+// hasActiveConsent used everywhere else in the app. See
+// src/features/consent/service.ts for why this needed its own function
+// rather than reusing hasActiveConsent directly.
+//
+// The check runs per GROUP (one check per patient+time, not per
+// medicine row) right before claiming, so a consent-blocked group's rows
+// are never claimed and last_sent_at is left untouched — if the patient
+// re-grants consent later, the reminder resumes on its normal schedule
+// with no special backfill needed. Blocked groups are counted separately
+// (consentBlocked) rather than folded into sent/failed, since this isn't
+// a delivery failure, it's expected behavior.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getMessageProvider } from '@/features/messaging/providers'
+import { hasActiveConsentService } from '@/features/consent/service'
 
 // English-only, per Item 4's explicit design decision.
 const PRESCRIPTION_REMINDER_TEMPLATE_NAME = 'curakin_medicine_reminder_en'
@@ -171,6 +194,7 @@ async function rollbackClaim(
 export type SendDueRemindersResult = {
   sent: number
   failed: number
+  consentBlocked: number
   groupedMessageCount: number
   reminderRowCount: number
   currentTime: string
@@ -179,12 +203,13 @@ export type SendDueRemindersResult = {
 
 /**
  * Finds medicine reminders due at the current IST minute, groups them by
- * (patient, reminder_time) into one WhatsApp message per group, claims
- * each row atomically before sending, sends via the active message
- * provider, and rolls back the claim on send failure so the row can be
- * retried. Safe to call repeatedly and safe to call concurrently — the
- * per-row compare-and-swap claim means overlapping invocations can never
- * both send the same dose.
+ * (patient, reminder_time) into one WhatsApp message per group, checks
+ * live 'medication_reminders' consent per group, claims each row
+ * atomically before sending, sends via the active message provider, and
+ * rolls back the claim on send failure so the row can be retried. Safe
+ * to call repeatedly and safe to call concurrently — the per-row
+ * compare-and-swap claim means overlapping invocations can never both
+ * send the same dose.
  */
 export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult> {
   const supabase = createClient(
@@ -237,7 +262,7 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
   console.log(`[sendDueMedicineReminders] Due this minute: ${due.length}`)
 
   if (due.length === 0) {
-    return { sent: 0, failed: 0, groupedMessageCount: 0, reminderRowCount: 0, currentTime }
+    return { sent: 0, failed: 0, consentBlocked: 0, groupedMessageCount: 0, reminderRowCount: 0, currentTime }
   }
 
   type ReminderGroupRow = {
@@ -291,9 +316,26 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
   const nowIso   = new Date().toISOString()
   let   sent     = 0
   let   failed   = unattributedFailures
+  let   consentBlocked = 0
   const errors: string[] = []
 
   for (const group of groups.values()) {
+    // DPDP gate: checked live, per group, BEFORE any row is claimed.
+    // 'medication_reminders' specifically — not 'whatsapp_notifications'
+    // — since the portal exposes these as independent toggles. A blocked
+    // group's rows are left completely untouched (no claim, no
+    // last_sent_at write), so re-granting consent later resumes normal
+    // scheduling with no special-case recovery needed.
+    const consented = await hasActiveConsentService(supabase, group.patientId, 'medication_reminders')
+    if (!consented) {
+      consentBlocked += group.rows.length
+      console.log(
+        `[sendDueMedicineReminders] group ${group.patientId}@${group.reminderTime} — ` +
+        `medication_reminders consent not active, skipping (${group.rows.length} dose(s))`
+      )
+      continue
+    }
+
     // Claim every row in this group atomically, in parallel. Only rows
     // we actually win get sent — a row already claimed by a concurrent
     // invocation (overlapping cron tick, or a manual "Run Now" click)
@@ -393,11 +435,12 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
     }
   }
 
-  console.log(`[sendDueMedicineReminders] Done — sent: ${sent}  failed: ${failed}`)
+  console.log(`[sendDueMedicineReminders] Done — sent: ${sent}  failed: ${failed}  consentBlocked: ${consentBlocked}`)
 
   return {
     sent,
     failed,
+    consentBlocked,
     groupedMessageCount: groups.size,
     reminderRowCount: due.length,
     currentTime,
