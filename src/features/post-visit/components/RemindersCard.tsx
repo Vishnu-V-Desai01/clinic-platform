@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import TimePicker, { convertTo24Hour, convertTo12Hour } from '@/components/time-picker'
 import type { PrescriptionLine, MedicineReminderTime } from '../types'
 
 interface RemindersCardProps {
@@ -40,37 +41,6 @@ const MEAL_ASSOCIATIONS = [
   { label: 'Any time', value: 'any_time' },
 ]
 
-// Convert 12-hour time to 24-hour format (HH:MM)
-function convertTo24Hour(hour: string, minute: string, period: 'AM' | 'PM'): string {
-  let h = parseInt(hour, 10)
-  const m = parseInt(minute, 10)
-
-  if (period === 'PM' && h !== 12) h += 12
-  if (period === 'AM' && h === 12) h = 0
-
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-
-// Convert 24-hour time to 12-hour format
-function convertTo12Hour(time24: string): { hour: string; minute: string; period: 'AM' | 'PM' } {
-  const [h, m] = time24.split(':').map(Number)
-  let hour = h
-  let period: 'AM' | 'PM' = 'AM'
-
-  if (h >= 12) {
-    period = 'PM'
-    if (h > 12) hour = h - 12
-  } else if (h === 0) {
-    hour = 12
-  }
-
-  return {
-    hour: String(hour),
-    minute: String(m).padStart(2, '0'),
-    period,
-  }
-}
-
 export default function RemindersCard({
   prescriptions,
   reminderTimes,
@@ -78,15 +48,18 @@ export default function RemindersCard({
 }: RemindersCardProps) {
   const [formMedicine,    setFormMedicine]    = useState('')
   const [formDuration,    setFormDuration]    = useState('')
-  const [formHour,        setFormHour]        = useState('08')
+  const [formHour,        setFormHour]        = useState('8')
   const [formMinute,      setFormMinute]      = useState('00')
   const [formPeriod,      setFormPeriod]      = useState<'AM' | 'PM'>('AM')
   const [formMealAssoc,   setFormMealAssoc]   = useState('')
+  const [timeValid,       setTimeValid]       = useState(true)
 
   const activePrescriptions = prescriptions.filter((rx) => !rx.isDeleted)
 
+  const canAdd = formMedicine.trim() !== '' && timeValid
+
   const handleAddReminder = () => {
-    if (!formMedicine.trim() || !formHour.trim() || !formMinute.trim()) return
+    if (!canAdd) return
 
     // Convert to 24-hour format for storage
     const time24 = convertTo24Hour(formHour, formMinute, formPeriod)
@@ -101,7 +74,7 @@ export default function RemindersCard({
     onReminderTimesChange([...reminderTimes, newReminder])
     setFormMedicine('')
     setFormDuration('')
-    setFormHour('08')
+    setFormHour('8')
     setFormMinute('00')
     setFormPeriod('AM')
     setFormMealAssoc('')
@@ -193,62 +166,16 @@ export default function RemindersCard({
             {/* Row 3: Time section (full width) */}
             <div className="flex flex-col gap-3">
               <Label className="text-sm font-medium">Time</Label>
-              <div className="flex gap-3 items-end">
-                {/* Hour */}
-                <div className="flex flex-col gap-2 flex-1">
-                  <Input
-                    type="number"
-                    min="1"
-                    max="12"
-                    step="1"
-                    value={formHour}
-                    onChange={(e) => {
-                      const val = Math.min(12, Math.max(1, parseInt(e.target.value, 10) || 1))
-                      setFormHour(String(val))
-                    }}
-                    className="h-11 text-center text-base"
-                    placeholder="HH"
-                  />
-                  <span className="text-xs text-muted-foreground text-center">Hour</span>
-                </div>
-
-                {/* Separator */}
-                <div className="pb-2">
-                  <span className="text-2xl font-semibold text-foreground">:</span>
-                </div>
-
-                {/* Minute */}
-                <div className="flex flex-col gap-2 flex-1">
-                  <Input
-                    type="number"
-                    min="0"
-                    max="59"
-                    step="1"
-                    value={formMinute}
-                    onChange={(e) => {
-                      const val = Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0))
-                      setFormMinute(String(val).padStart(2, '0'))
-                    }}
-                    className="h-11 text-center text-base"
-                    placeholder="MM"
-                  />
-                  <span className="text-xs text-muted-foreground text-center">Minute</span>
-                </div>
-
-                {/* AM/PM */}
-                <div className="flex flex-col gap-2 flex-1">
-                  <Select value={formPeriod} onValueChange={(v) => setFormPeriod(v as 'AM' | 'PM')}>
-                    <SelectTrigger className="h-11">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="AM">AM</SelectItem>
-                      <SelectItem value="PM">PM</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span className="text-xs text-muted-foreground text-center">Period</span>
-                </div>
-              </div>
+              <TimePicker
+                hour={formHour}
+                minute={formMinute}
+                period={formPeriod}
+                onHourChange={setFormHour}
+                onMinuteChange={setFormMinute}
+                onPeriodChange={setFormPeriod}
+                onValidityChange={setTimeValid}
+                idPrefix="pv-reminder-time"
+              />
             </div>
 
             {/* Row 4: Meal association (full width) */}
@@ -272,7 +199,7 @@ export default function RemindersCard({
 
             {/* Add button */}
             <div className="pt-4">
-              <Button onClick={handleAddReminder} className="w-full sm:w-auto" size="lg">
+              <Button onClick={handleAddReminder} disabled={!canAdd} className="w-full sm:w-auto" size="lg">
                 <Plus className="mr-2 h-4 w-4" />
                 Add reminder
               </Button>
