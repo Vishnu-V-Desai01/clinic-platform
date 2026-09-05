@@ -8,6 +8,7 @@ import { requireRole } from "@/lib/supabase/profile";
 import { generateAndStorePaymentDocuments } from "@/features/payments/document-storage";
 import { INCLUDED_MESSAGE_LIMIT, OVERAGE_RATE_PAISE } from "@/lib/config/messaging";
 import { hasActiveConsent } from "@/features/consent/actions";
+import type { ConsentPurpose } from "@/features/consent/types";
 import {
   createRegistrationMessageInputSchema,
   createAppointmentMessageInputSchema,
@@ -61,6 +62,43 @@ function formatPhoneWithCountryCode(phone: string, countryCode: string): string 
 // it's about to actually go out.
 const CONSENT_DENIED_ERROR =
   "This patient has not consented to WhatsApp notifications.";
+
+// DPDP consent gate, type-specific: used ONLY for message types that
+// carry a second, more granular purpose on top of the broad
+// whatsapp_notifications master switch. Appointment reminders are the
+// first (and currently only) type with such a sub-toggle — the portal
+// exposes 'appointment_reminders' as an independent switch a patient can
+// flip off while leaving general WhatsApp notifications on. See the
+// getAdditionalConsentPurpose() mapping below for which types this
+// applies to.
+const APPOINTMENT_REMINDER_CONSENT_DENIED_ERROR =
+  "This patient has not consented to appointment reminders.";
+
+// Maps a message_queue.type to the additional, type-specific consent
+// purpose that must ALSO be active (on top of whatsapp_notifications)
+// before a message of that type may be created or sent. Returns null for
+// types that are only gated by the broad whatsapp_notifications purpose
+// — receipts, medicine receipts, prescriptions, and registration are not
+// "reminders" in the granular sense the portal's purpose list draws, so
+// they intentionally have no second gate here.
+//
+// Used at BOTH enforcement points (create*Message and sendMessage) so a
+// consent revocation for the specific purpose propagates the same way
+// whether it happens before a message is ever queued or after it's
+// already sitting pending — mirroring exactly how the whatsapp_notifications
+// check already works at both points.
+function getAdditionalConsentPurpose(messageType: string): ConsentPurpose | null {
+  if (messageType === "appointment") return "appointment_reminders";
+  return null;
+}
+
+function additionalConsentDeniedError(purpose: ConsentPurpose): string {
+  if (purpose === "appointment_reminders") return APPOINTMENT_REMINDER_CONSENT_DENIED_ERROR;
+  // Fallback for any future purpose added to getAdditionalConsentPurpose
+  // without a matching dedicated error string — generic but still
+  // accurate and never silently blank.
+  return `This patient has not consented to ${purpose.replace(/_/g, " ")}.`;
+}
 
 // ── Message visibility scoping (Issue 3, re-scoped) ────────────────
 //
@@ -316,6 +354,19 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
   const consented = await hasActiveConsent(appointment.patient_id, "whatsapp_notifications");
   if (!consented) {
     return { success: false, error: CONSENT_DENIED_ERROR };
+  }
+
+  // DPDP gate, type-specific: appointment messages also require the
+  // narrower 'appointment_reminders' purpose — a patient can leave
+  // general WhatsApp notifications on but switch this off specifically,
+  // and that must independently block appointment reminders. See
+  // getAdditionalConsentPurpose() above.
+  const appointmentRemindersConsented = await hasActiveConsent(
+    appointment.patient_id,
+    "appointment_reminders"
+  );
+  if (!appointmentRemindersConsented) {
+    return { success: false, error: APPOINTMENT_REMINDER_CONSENT_DENIED_ERROR };
   }
 
   if (appointment.status !== "scheduled") {
@@ -628,9 +679,6 @@ const token = await regenerateDocumentLink(supabase, doc.id, profile.clinic_id, 
 // ============================================================================
 // sendMessage
 // ============================================================================
-// ============================================================================
-// sendMessage
-// ============================================================================
 export async function sendMessage(input: SendMessageInput) {
   const profile = await requireRole("doctor", "staff");
   const { messageId } = sendMessageInputSchema.parse(input);
@@ -694,6 +742,51 @@ export async function sendMessage(input: SendMessageInput) {
 
     revalidatePath("/dashboard/messages");
     return { success: false, error: CONSENT_DENIED_ERROR };
+  }
+
+  // DPDP gate, type-specific: same re-check pattern as above, but for the
+  // narrower purpose tied to this specific message type (currently only
+  // 'appointment' -> 'appointment_reminders'; see
+  // getAdditionalConsentPurpose()). Without this, a patient who revokes
+  // 'appointment_reminders' specifically — while leaving
+  // 'whatsapp_notifications' on — would have no effect on an
+  // already-queued appointment reminder, since the check above only
+  // covers the broad purpose. This closes that gap the same way the
+  // broad check already closes it for whatsapp_notifications.
+  const additionalPurpose = getAdditionalConsentPurpose(message.type);
+  if (additionalPurpose) {
+    const additionalConsented = await hasActiveConsent(message.patient_id, additionalPurpose);
+    if (!additionalConsented) {
+      const errorMessage = additionalConsentDeniedError(additionalPurpose);
+
+      await supabase
+        .from("message_queue")
+        .update({
+          status: "failed",
+          error_message: errorMessage,
+        })
+        .eq("id", messageId);
+
+      await supabase.from("message_delivery_logs").insert({
+        clinic_id: message.clinic_id,
+        message_queue_id: messageId,
+        action: "failed",
+        performed_by: profile.id,
+        details: { errorMessage },
+      });
+
+      if (typeof window !== 'undefined') {
+        try {
+          const { playSound } = await import('@/lib/sounds')
+          playSound('error')
+        } catch (err) {
+          console.debug('[sendMessage] Sound playback failed:', err)
+        }
+      }
+
+      revalidatePath("/dashboard/messages");
+      return { success: false, error: errorMessage };
+    }
   }
 
   if (message.status !== "pending") {

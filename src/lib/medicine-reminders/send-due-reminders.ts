@@ -52,15 +52,20 @@
 // path previously sent medicine reminders with NO consent check
 // whatsoever — a patient revoking any consent purpose in the portal,
 // including WhatsApp notifications entirely, had zero effect on medicine
-// reminders continuing to arrive. Fixed by checking the
-// 'medication_reminders' purpose specifically (not the broader
-// 'whatsapp_notifications' — these are deliberately separate toggles in
-// the portal UI; a patient can keep general WhatsApp notifications on
-// while turning off medication reminders specifically) via
-// hasActiveConsentService, the session-free counterpart to
+// reminders continuing to arrive. Fixed by requiring BOTH:
+//   - 'whatsapp_notifications' — the broad "any WhatsApp at all" master
+//     switch, same purpose every other message type in this app is
+//     gated on
+//   - 'medication_reminders'   — the specific sub-toggle for this
+//     message type
+// via hasActiveConsentService, the session-free counterpart to
 // hasActiveConsent used everywhere else in the app. See
 // src/features/consent/service.ts for why this needed its own function
-// rather than reusing hasActiveConsent directly.
+// rather than reusing hasActiveConsent directly. Both are checked
+// because the portal exposes them as genuinely independent toggles —
+// revoking either one alone should be enough to stop this specific send,
+// matching the same "master switch + sub-toggle" pattern applied to
+// createAppointmentMessage's appointment_reminders check.
 //
 // The check runs per GROUP (one check per patient+time, not per
 // medicine row) right before claiming, so a consent-blocked group's rows
@@ -321,17 +326,26 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
 
   for (const group of groups.values()) {
     // DPDP gate: checked live, per group, BEFORE any row is claimed.
-    // 'medication_reminders' specifically — not 'whatsapp_notifications'
-    // — since the portal exposes these as independent toggles. A blocked
-    // group's rows are left completely untouched (no claim, no
+    // Both purposes are required — 'whatsapp_notifications' (master
+    // switch) AND 'medication_reminders' (this message type's specific
+    // sub-toggle). Either one being revoked is enough to block the send.
+    // A blocked group's rows are left completely untouched (no claim, no
     // last_sent_at write), so re-granting consent later resumes normal
     // scheduling with no special-case recovery needed.
-    const consented = await hasActiveConsentService(supabase, group.patientId, 'medication_reminders')
-    if (!consented) {
+    const [whatsappConsented, medicationConsented] = await Promise.all([
+      hasActiveConsentService(supabase, group.patientId, 'whatsapp_notifications'),
+      hasActiveConsentService(supabase, group.patientId, 'medication_reminders'),
+    ])
+    if (!whatsappConsented || !medicationConsented) {
       consentBlocked += group.rows.length
+      const reason = !whatsappConsented && !medicationConsented
+        ? 'whatsapp_notifications and medication_reminders'
+        : !whatsappConsented
+          ? 'whatsapp_notifications'
+          : 'medication_reminders'
       console.log(
         `[sendDueMedicineReminders] group ${group.patientId}@${group.reminderTime} — ` +
-        `medication_reminders consent not active, skipping (${group.rows.length} dose(s))`
+        `${reason} consent not active, skipping (${group.rows.length} dose(s))`
       )
       continue
     }

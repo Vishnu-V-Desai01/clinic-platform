@@ -1,22 +1,18 @@
-// src/features/analytics/components/analytics-dashboard-container.tsx
+﻿// src/features/analytics/components/analytics-dashboard-container.tsx
 //
 // Bridges the presentational AnalyticsDashboard (label-based range state,
 // e.g. "This Week") and the backend (snake_case DateRangePreset values,
-// e.g. "this_week"). Fetches all data sources in parallel on mount and on
-// every range change.
+// e.g. "this_week"). Initial data arrives as a prop from the server
+// component (page.tsx) -- zero client fetches on first paint. Range
+// changes and rollup trigger a single bundled Server Action call.
 
 'use client'
 
-import { useCallback, useEffect, useState, useTransition } from 'react'
+import { useCallback, useState, useTransition } from 'react'
 import AnalyticsDashboard from './analytics-dashboard'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  getDoctorDashboardData,
-  getDoctorDashboardSeries,
-  getDoctorAnomalyAlerts,
-  getAppointmentEfficiency,
-  runDailyRollup,
-} from '../actions'
+import { getAnalyticsDashboardBundle, runDailyRollup } from '../actions'
+import type { AnalyticsDashboardBundle } from '../actions'
 import type {
   DoctorDashboardResult,
   DoctorDashboardSeries,
@@ -107,68 +103,62 @@ function AnalyticsDashboardSkeleton() {
   )
 }
 
-export default function AnalyticsDashboardContainer() {
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<DoctorDashboardResult | null>(null)
-  const [series, setSeries] = useState<DoctorDashboardSeries | null>(null)
-  const [anomalies, setAnomalies] = useState<AnomalyAlertRecord[]>([])
-  const [efficiency, setEfficiency] = useState<AppointmentEfficiencyResult | null>(null)
-  const [currentFilter, setCurrentFilter] = useState<DateRangeFilterInput>({ preset: 'this_month' })
+interface DashboardState {
+  result: DoctorDashboardResult | null
+  series: DoctorDashboardSeries | null
+  anomalies: AnomalyAlertRecord[]
+  efficiency: AppointmentEfficiencyResult | null
+  error: string | null
+}
+
+function bundleToState(bundle: AnalyticsDashboardBundle): DashboardState {
+  // Summary cards are the core of the page -- a failure here is fatal.
+  if (!bundle.data.success) {
+    return { result: null, series: null, anomalies: [], efficiency: null, error: bundle.data.error }
+  }
+
+  // Charts, alerts, and efficiency all degrade gracefully -- the cards
+  // still work without them.
+  if (!bundle.series.success) {
+    console.error('[AnalyticsDashboardContainer] series failed:', bundle.series.error)
+  }
+  if (!bundle.anomalies.success) {
+    console.error('[AnalyticsDashboardContainer] anomalies failed:', bundle.anomalies.error)
+  }
+  if (!bundle.efficiency.success) {
+    console.error('[AnalyticsDashboardContainer] efficiency failed:', bundle.efficiency.error)
+  }
+
+  return {
+    result: bundle.data.data,
+    series: bundle.series.success ? bundle.series.data : null,
+    anomalies: bundle.anomalies.success ? bundle.anomalies.data : [],
+    efficiency: bundle.efficiency.success ? bundle.efficiency.data : null,
+    error: null,
+  }
+}
+
+interface AnalyticsDashboardContainerProps {
+  initialData: AnalyticsDashboardBundle
+  initialFilter: DateRangeFilterInput
+}
+
+export default function AnalyticsDashboardContainer({
+  initialData,
+  initialFilter,
+}: AnalyticsDashboardContainerProps) {
+  const [state, setState] = useState<DashboardState>(() => bundleToState(initialData))
+  const [loading, setLoading] = useState(false)
+  const [currentFilter, setCurrentFilter] = useState<DateRangeFilterInput>(initialFilter)
 
   const [isRollupPending, startRollupTransition] = useTransition()
   const [rollupMessage, setRollupMessage] = useState<string | null>(null)
 
   const load = useCallback(async (filter: DateRangeFilterInput) => {
     setLoading(true)
-    setError(null)
-
-    const [dataRes, seriesRes, anomalyRes, efficiencyRes] = await Promise.all([
-  getDoctorDashboardData(filter),
-  getDoctorDashboardSeries(filter),
-  getDoctorAnomalyAlerts(),
-  getAppointmentEfficiency(filter),
-])
-
-    // Summary cards are the core of the page — a failure here is fatal.
-    if (!dataRes.success) {
-      setError(dataRes.error)
-      setResult(null)
-      setLoading(false)
-      return
-    }
-    setResult(dataRes.data)
-
-    // Charts, alerts, and efficiency all degrade gracefully — the cards
-    // still work without them.
-    if (seriesRes.success) {
-      setSeries(seriesRes.data)
-    } else {
-      console.error('[AnalyticsDashboardContainer] series failed:', seriesRes.error)
-      setSeries(null)
-    }
-
-    if (anomalyRes.success) {
-      setAnomalies(anomalyRes.data)
-    } else {
-      console.error('[AnalyticsDashboardContainer] anomalies failed:', anomalyRes.error)
-      setAnomalies([])
-    }
-
-    if (efficiencyRes.success) {
-      setEfficiency(efficiencyRes.data)
-    } else {
-      console.error('[AnalyticsDashboardContainer] efficiency failed:', efficiencyRes.error)
-      setEfficiency(null)
-    }
-
+    const bundle = await getAnalyticsDashboardBundle(filter)
+    setState(bundleToState(bundle))
     setLoading(false)
-  }, [])
-
-  // Initial load only — subsequent loads are triggered by handleRangeChange.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    load(currentFilter)
   }, [])
 
   const handleRangeChange = (range: { preset: string; start?: string; end?: string }) => {
@@ -195,32 +185,32 @@ export default function AnalyticsDashboardContainer() {
     })
   }
 
-  if (loading && !result) {
+  if (loading && !state.result) {
     return <AnalyticsDashboardSkeleton />
   }
 
-  if (error) {
+  if (state.error) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center px-4">
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-sm text-destructive">{state.error}</p>
       </div>
     )
   }
 
   return (
     <AnalyticsDashboard
-      anomalies={anomalies.map(toBannerAnomaly)}
-      income={result?.income}
-      activity={result?.activity}
+      anomalies={state.anomalies.map(toBannerAnomaly)}
+      income={state.result?.income}
+      activity={state.result?.activity}
       revenueSeries={
-        series?.revenueSeries.map((p) => ({ date: p.date, revenuePaise: p.value })) ?? []
+        state.series?.revenueSeries.map((p) => ({ date: p.date, revenuePaise: p.value })) ?? []
       }
-      appointmentsSeries={series?.appointmentsSeries ?? []}
+      appointmentsSeries={state.series?.appointmentsSeries ?? []}
       registrationsSeries={
-        series?.registrationsSeries.map((p) => ({ date: p.date, count: p.value })) ?? []
+        state.series?.registrationsSeries.map((p) => ({ date: p.date, count: p.value })) ?? []
       }
-      busiestDays={series?.busiestDays ?? []}
-      appointmentEfficiency={efficiency ?? undefined}
+      busiestDays={state.series?.busiestDays ?? []}
+      appointmentEfficiency={state.efficiency ?? undefined}
       onRangeChange={handleRangeChange}
       onRunRollup={handleRunRollup}
       isRollupPending={isRollupPending}

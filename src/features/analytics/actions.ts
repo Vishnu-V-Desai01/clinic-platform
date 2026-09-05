@@ -683,3 +683,33 @@ export async function getAppointmentEfficiency(
     return { success: false, error: 'Failed to load appointment efficiency data.' }
   }
 }
+
+export interface AnalyticsDashboardBundle {
+  data: Result<DoctorDashboardResult>
+  series: Result<DoctorDashboardSeries>
+  anomalies: Result<AnomalyAlertRecord[]>
+  efficiency: Result<AppointmentEfficiencyResult>
+}
+
+/**
+ * Bundles all four analytics reads into a single Server Action.
+ *
+ * When called from the client container this collapses 4 sequential
+ * client->server RPC round trips (each paying full network + auth
+ * overhead) into 1. When called directly from a server component
+ * (page.tsx) it costs nothing extra at all -- it's a plain in-process
+ * function call. Query logic, RLS filtering, and per-branch error
+ * handling are unchanged; this only changes where Promise.all runs.
+ */
+export async function getAnalyticsDashboardBundle(
+  rawFilter: unknown,
+): Promise<AnalyticsDashboardBundle> {
+  const [data, series, anomalies, efficiency] = await Promise.all([
+    getDoctorDashboardData(rawFilter),
+    getDoctorDashboardSeries(rawFilter),
+    getDoctorAnomalyAlerts(),
+    getAppointmentEfficiency(rawFilter),
+  ])
+
+  return { data, series, anomalies, efficiency }
+}
