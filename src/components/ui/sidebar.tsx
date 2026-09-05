@@ -180,7 +180,7 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+      <Sheet open={openMobile} onOpenChange={setOpenMobile} modal={false} {...props}>
         <SheetContent
           dir={dir}
           data-sidebar="sidebar"
@@ -195,10 +195,10 @@ function Sidebar({
           side={side}
           onPointerDownOutside={(event) => {
             // Clerk's <UserButton /> popover portals to document.body, outside
-            // this Sheet's Radix Dialog content subtree. Radix's dismissable
-            // layer treats any tap inside the popover as an "outside"
-            // interaction and closes this drawer before Clerk's own click
-            // handler (e.g. Sign out) can fire. Clerk applies a stable,
+            // this Sheet's Radix Dialog content subtree. Even with modal={false}
+            // (which stops Radix from aria-hiding / focus-trapping the popover),
+            // a tap inside the popover still counts as "outside" this dialog's
+            // own content for dismiss purposes. Clerk applies a stable,
             // documented `cl-` prefixed class name to everything it renders
             // (part of their public "appearance" custom-classname API) — use
             // that to recognize Clerk-rendered elements and let taps inside
