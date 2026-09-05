@@ -193,6 +193,27 @@ function Sidebar({
             } as React.CSSProperties
           }
           side={side}
+          onPointerDownOutside={(event) => {
+            // Clerk's <UserButton /> popover portals to document.body, outside
+            // this Sheet's Radix Dialog content subtree. Radix's dismissable
+            // layer treats any tap inside the popover as an "outside"
+            // interaction and closes this drawer before Clerk's own click
+            // handler (e.g. Sign out) can fire. Clerk applies a stable,
+            // documented `cl-` prefixed class name to everything it renders
+            // (part of their public "appearance" custom-classname API) — use
+            // that to recognize Clerk-rendered elements and let taps inside
+            // them through without dismissing the drawer.
+            const target = event.target as HTMLElement | null
+            if (target?.closest('[class*="cl-"]')) {
+              event.preventDefault()
+            }
+          }}
+          onInteractOutside={(event) => {
+            const target = event.target as HTMLElement | null
+            if (target?.closest('[class*="cl-"]')) {
+              event.preventDefault()
+            }
+          }}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Sidebar</SheetTitle>
