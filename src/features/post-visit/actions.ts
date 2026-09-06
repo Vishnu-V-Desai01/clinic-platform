@@ -44,12 +44,24 @@
 //     and completeVisit (in case the client's prefill data was stale by
 //     the time save is submitted).
 //
-// Item 7 addition: searchPastMedicineNames — a debounced, clinic-scoped
+// Item 7a addition: searchPastMedicineNames — a debounced, clinic-scoped
 // autocomplete source for PrescriptionsCard, distinct from the pharmacy
 // catalogue lookup (which lives in features/pharmacy/actions.ts). Queries
 // prescriptions.medicine_name directly (clinic_id is a column on that
 // table already, no join needed) so a doctor gets suggestions even for
 // medicines never added to the pharmacy catalogue.
+//
+// Item 7b addition: searchPastNoteLines — doctor-scoped (not clinic-wide,
+// per the confirmed snippet-scope decision applied consistently here)
+// autocomplete for EncounterCard's clinical notes field, matched against
+// the CURRENT LINE being typed rather than the whole note (clinical notes
+// are long free text; full-note matching doesn't fit a live-typing
+// autocomplete the way a short medicine name does). Reads
+// encounters.notes directly — a plain ILIKE + LIMIT for now, no trigram/
+// prefix index; add one later only if this proves slow in practice on a
+// real clinic's note volume. Entirely server-side, no external service —
+// satisfies the "internal clinician tooling, no PII leaving the system"
+// guardrail by construction.
 
 'use server'
 
@@ -203,7 +215,7 @@ function isWithinEditWindow(appointmentDateISO: string): boolean {
   return Date.now() - appointmentTime <= EDIT_WINDOW_MS
 }
 
-// ─── searchPastMedicineNames (Item 7) ───────────────────────────────────────
+// ─── searchPastMedicineNames (Item 7a) ───────────────────────────────────────
 //
 // Second autocomplete source alongside the pharmacy catalogue in
 // PrescriptionsCard: distinct medicine names this clinic has actually
@@ -253,6 +265,76 @@ export async function searchPastMedicineNames(query: string): Promise<string[]> 
     seen.add(key)
     results.push(row.medicine_name)
     if (results.length >= MAX_MEDICINE_SEARCH_RESULTS) break
+  }
+
+  return results
+}
+
+// ─── searchPastNoteLines (Item 7b) ──────────────────────────────────────────
+//
+// Doctor-scoped (not clinic-wide) autocomplete for EncounterCard's clinical
+// notes textarea. Matches against the CURRENT LINE being typed, not the
+// whole note — a note is long free text, so suggesting whole past notes
+// wouldn't fit a live-typing autocomplete the way a short medicine name
+// does. "Line" is defined simply as text between newline characters; a
+// doctor's soft-wrapped paragraph without an explicit line break is not
+// split further.
+//
+// Over-fetches a bounded number of the doctor's own past encounters whose
+// notes contain the typed text (ILIKE — no trigram/prefix index yet; add
+// one later only if this proves slow at real note volume), then splits
+// each into lines and filters/dedupes in JS, same pattern as
+// searchPastMedicineNames above. Entirely server-side — no external AI
+// service, satisfying the "internal clinician tooling, PII stays in the
+// system" requirement by construction.
+
+const MIN_NOTE_LINE_SEARCH_LENGTH = 3
+const MAX_NOTE_LINE_SEARCH_RESULTS = 6
+const MAX_NOTE_ENCOUNTERS_SCANNED = 100
+
+export async function searchPastNoteLines(query: string): Promise<string[]> {
+  const profile = await getOrCreateProfile()
+  if (!profile || profile.role !== 'doctor') return []
+
+  const clinicId = profile.clinic_id
+  if (!clinicId) return []
+
+  const trimmed = query.trim()
+  if (trimmed.length < MIN_NOTE_LINE_SEARCH_LENGTH) return []
+
+  const supabase = createServerSupabaseClient()
+
+  const { data, error } = await supabase
+    .from('encounters')
+    .select('notes, encounter_date')
+    .eq('doctor_id', profile.id)
+    .eq('clinic_id', clinicId)
+    .not('notes', 'is', null)
+    .ilike('notes', `%${trimmed}%`)
+    .order('encounter_date', { ascending: false })
+    .limit(MAX_NOTE_ENCOUNTERS_SCANNED)
+
+  if (error) {
+    console.error('[searchPastNoteLines]', error)
+    return []
+  }
+
+  const queryLower = trimmed.toLowerCase()
+  const seen = new Set<string>()
+  const results: string[] = []
+
+  outer: for (const row of data ?? []) {
+    if (!row.notes) continue
+    for (const rawLine of row.notes.split('\n')) {
+      const line = rawLine.trim()
+      if (!line) continue
+      if (!line.toLowerCase().includes(queryLower)) continue
+      const key = line.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      results.push(line)
+      if (results.length >= MAX_NOTE_LINE_SEARCH_RESULTS) break outer
+    }
   }
 
   return results

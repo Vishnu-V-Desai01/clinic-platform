@@ -18,13 +18,21 @@
 // line (no id yet, never saved) is still just removed from the array
 // outright, since there's nothing on the server to tell to delete.
 //
-// Item 7a: a "Insert snippet…" dropdown sits beside the Clinical notes
+// Item 7a: an "Insert snippet…" dropdown sits beside the Clinical notes
 // label, pulling the doctor's own saved snippets (doctor-scoped — see
 // features/clinical-snippets). Selecting one inserts its body at the
 // current cursor position in the notes textarea (or the end, if nothing
 // is focused) — it never overwrites text already typed, only adds to it.
 // A "Manage snippets" link opens the dedicated management page in a new
 // tab so the doctor doesn't lose their place mid-visit.
+//
+// Item 7b: as the doctor types in Clinical notes, a debounced dropdown
+// below the textarea suggests completions matched against the CURRENT
+// LINE being typed (from the last line break to the cursor), drawn from
+// this doctor's own past encounter notes. Selecting a suggestion replaces
+// only that typed line-prefix with the suggestion text — never touches
+// anything before it or after the cursor on the same line. Assists only;
+// the doctor can always keep typing freely and ignore every suggestion.
 
 'use client'
 
@@ -44,6 +52,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { listSnippetsForInsert } from '@/features/clinical-snippets/actions'
 import type { ClinicalNoteSnippet } from '@/features/clinical-snippets/types'
+import { searchPastNoteLines } from '../actions'
 import type {
   EncounterData,
   DiagnosisLine,
@@ -86,6 +95,9 @@ const EMPTY_OBS_FORM = {
   unit:            '',
 }
 
+const NOTE_LINE_SEARCH_DEBOUNCE_MS = 250
+const NOTE_LINE_MIN_LENGTH = 3
+
 export default function EncounterCard({ value, onChange }: EncounterCardProps) {
   const [showDiagForm, setShowDiagForm] = useState(false)
   const [showObsForm,  setShowObsForm]  = useState(false)
@@ -96,6 +108,18 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
   const [snippets, setSnippets]       = useState<ClinicalNoteSnippet[]>([])
   const [snippetsLoaded, setSnippetsLoaded] = useState(false)
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Item 7b: past-note-line autocomplete state.
+  const [noteLineSuggestions, setNoteLineSuggestions] = useState<string[]>([])
+  const [noteLinesLoading, setNoteLinesLoading]       = useState(false)
+  const [showNoteSuggestions, setShowNoteSuggestions] = useState(false)
+  const noteLinesDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noteLinesRequestId = useRef(0)
+  const noteSuggestionsBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Tracks the [lineStart, cursorPos) range the current suggestions are
+  // for, so selecting one replaces exactly that span — set fresh on every
+  // keystroke in handleNotesChange.
+  const currentLineRangeRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 })
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +161,72 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
       }
     })
   }
+
+  // ── Past-note-line autocomplete (Item 7b) ────────────────────────────
+  const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const textarea = e.target
+    const newValue = textarea.value
+    const cursorPos = textarea.selectionStart ?? newValue.length
+
+    patch({ notes: newValue || undefined })
+
+    const lineStart = newValue.lastIndexOf('\n', cursorPos - 1) + 1
+    currentLineRangeRef.current = { start: lineStart, end: cursorPos }
+    const currentLineText = newValue.slice(lineStart, cursorPos).trim()
+
+    if (noteLinesDebounce.current) clearTimeout(noteLinesDebounce.current)
+
+    if (currentLineText.length < NOTE_LINE_MIN_LENGTH) {
+      setNoteLineSuggestions([])
+      setNoteLinesLoading(false)
+      setShowNoteSuggestions(false)
+      return
+    }
+
+    setShowNoteSuggestions(true)
+    noteLinesDebounce.current = setTimeout(() => {
+      const thisRequestId = ++noteLinesRequestId.current
+      setNoteLinesLoading(true)
+      searchPastNoteLines(currentLineText).then((lines) => {
+        if (thisRequestId !== noteLinesRequestId.current) return // stale response, ignore
+        setNoteLineSuggestions(lines)
+        setNoteLinesLoading(false)
+      })
+    }, NOTE_LINE_SEARCH_DEBOUNCE_MS)
+  }
+
+  const handleSelectNoteLine = (line: string) => {
+    const current = value.notes ?? ''
+    const { start, end } = currentLineRangeRef.current
+    const before = current.slice(0, start)
+    const after  = current.slice(end)
+    const newValue = before + line + after
+
+    patch({ notes: newValue || undefined })
+    setShowNoteSuggestions(false)
+    setNoteLineSuggestions([])
+
+    requestAnimationFrame(() => {
+      const textarea = notesTextareaRef.current
+      if (textarea) {
+        const newCursorPos = before.length + line.length
+        textarea.focus()
+        textarea.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    })
+  }
+
+  const handleNotesBlur = () => {
+    // Delay so a click on a suggestion registers before the list unmounts
+    // (same blur-race workaround used in PrescriptionsCard).
+    noteSuggestionsBlurTimeout.current = setTimeout(() => setShowNoteSuggestions(false), 150)
+  }
+
+  const handleNotesFocus = () => {
+    if (noteSuggestionsBlurTimeout.current) clearTimeout(noteSuggestionsBlurTimeout.current)
+  }
+
+  const hasNoteSuggestions = noteLineSuggestions.length > 0 || noteLinesLoading
 
   // ── Diagnosis handlers ────────────────────────────────────────────────
 
@@ -261,14 +351,43 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
             </Link>
           </div>
         </div>
-        <Textarea
-          id="pv-notes"
-          ref={notesTextareaRef}
-          placeholder="Findings, examination notes, plan…"
-          rows={4}
-          value={value.notes ?? ''}
-          onChange={(e) => patch({ notes: e.target.value || undefined })}
-        />
+        <div className="relative">
+          <Textarea
+            id="pv-notes"
+            ref={notesTextareaRef}
+            placeholder="Findings, examination notes, plan…"
+            rows={4}
+            value={value.notes ?? ''}
+            onChange={handleNotesChange}
+            onFocus={handleNotesFocus}
+            onBlur={handleNotesBlur}
+          />
+          {showNoteSuggestions && hasNoteSuggestions && (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+              {noteLineSuggestions.map((line, idx) => (
+                <button
+                  key={`${idx}-${line}`}
+                  type="button"
+                  className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
+                  onMouseDown={(e) => e.preventDefault()} // keep textarea focus so onBlur's timeout doesn't race this click
+                  onClick={() => handleSelectNoteLine(line)}
+                  title={line}
+                >
+                  {line}
+                </button>
+              ))}
+              {noteLinesLoading && (
+                <>
+                  {noteLineSuggestions.length > 0 && <div className="border-t border-border" />}
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
+                    Searching previous notes…
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Diagnoses ─────────────────────────────────────────────────── */}
