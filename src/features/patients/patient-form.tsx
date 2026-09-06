@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 import { createPatient, updatePatient } from "./actions"
 import { LANGUAGE_OPTIONS } from "./schema"
-import { BLOOD_GROUPS, GENDER_OPTIONS, RELATIONSHIP_OPTIONS, STATUS_OPTIONS } from "./types"
+import { BLOOD_GROUPS, GENDER_OPTIONS, RELATIONSHIP_OPTIONS, STATUS_OPTIONS, calculateAge } from "./types"
 import type { PatientFormValues, PatientRecord } from "./types"
 import type { DoctorOption } from "@/features/appointments/types"
 
@@ -41,7 +41,7 @@ interface PatientFormProps {
 /* -------------------------------------------------------------------------- */
 
 const EMPTY_VALUES: PatientFormValues = {
-  firstName: "", lastName: "", dateOfBirth: "", gender: "",
+  firstName: "", lastName: "", dateOfBirth: "", dobIsApproximate: false, gender: "",
   bloodGroup: "", mrn: "", status: "active", assignedDoctorId: "",
   phone: "", email: "",
   addressLine: "", city: "", state: "", pincode: "",
@@ -56,6 +56,7 @@ function toFormValues(p: PatientRecord): PatientFormValues {
     firstName:             p.first_name,
     lastName:              p.last_name,
     dateOfBirth:           p.date_of_birth ?? "",
+    dobIsApproximate:      p.dob_is_approximate ?? false,
     gender:                p.gender ?? "",
     bloodGroup:            p.blood_group ?? "",
     mrn:                   p.patient_id_number ?? "",
@@ -194,8 +195,73 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
     isEdit && patient ? toFormValues(patient) : EMPTY_VALUES,
   )
 
+  // Item 6: Age <-> DOB two-way sync.
+  //
+  // `dateOfBirth` + `dobIsApproximate` (both in `values`, both submitted)
+  // are the single source of truth — Age is only ever a VIEW of them, or
+  // a way to WRITE them, never a separately stored value.
+  //
+  // - A manually typed DOB is always exact: dobIsApproximate is forced
+  //   false the moment the DOB field itself is edited, and Age becomes
+  //   disabled, showing the computed value. This is the "DOB wins, stays
+  //   exact" precedence — entering both never lets Age silently overwrite
+  //   a real date typed on purpose.
+  // - Age is only editable when there's no exact DOB on file (empty, or
+  //   itself previously derived from an Age entry). Typing an age derives
+  //   dateOfBirth = "{currentYear - age}-01-01" and sets
+  //   dobIsApproximate = true.
+  // - Clearing Age while it was the source of the current DOB clears DOB
+  //   back out too, so the two fields never end up silently disagreeing.
+  const [ageDraft, setAgeDraft] = React.useState<string>(() => {
+    if (values.dateOfBirth && values.dobIsApproximate) {
+      const derivedAge = calculateAge(values.dateOfBirth)
+      return derivedAge !== null ? String(derivedAge) : ""
+    }
+    return ""
+  })
+
+  const hasExactDob = values.dateOfBirth !== "" && !values.dobIsApproximate
+  const ageFieldDisabled = hasExactDob
+
+  const ageDisplayValue = hasExactDob
+    ? (calculateAge(values.dateOfBirth) ?? "").toString()
+    : ageDraft
+
   function set<K extends keyof PatientFormValues>(key: K, value: PatientFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function handleDobChange(text: string) {
+    set("dateOfBirth", text)
+    set("dobIsApproximate", false) // a manually typed date is always exact
+    if (text === "") {
+      setAgeDraft("")
+    }
+  }
+
+  function handleAgeChange(text: string) {
+    // Numbers only, matching the "no. of days"-style guard used elsewhere
+    // in this codebase for small numeric fields.
+    const cleaned = text.replace(/\D/g, "").slice(0, 3)
+    setAgeDraft(cleaned)
+
+    if (cleaned === "") {
+      // Only clear DOB if it was derived from Age in the first place —
+      // never touch an exact DOB (shouldn't be reachable while an exact
+      // DOB is present, since the field is disabled then, but this keeps
+      // the function safe regardless of caller).
+      if (values.dobIsApproximate) {
+        set("dateOfBirth", "")
+        set("dobIsApproximate", false)
+      }
+      return
+    }
+
+    const age = parseInt(cleaned, 10)
+    const derivedYear = new Date().getFullYear() - age
+    const derivedDob = `${derivedYear}-01-01`
+    set("dateOfBirth", derivedDob)
+    set("dobIsApproximate", true)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -284,7 +350,30 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
                     </FieldLabel>
                     <IconInput icon={Calendar} id="dob" type="date"
                       value={values.dateOfBirth}
-                      onChange={(e) => set("dateOfBirth", e.target.value)} />
+                      onChange={(e) => handleDobChange(e.target.value)} />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <FieldLabel htmlFor="age">
+                      Age{" "}
+                      <span className="font-normal text-muted-foreground">
+                        {ageFieldDisabled ? "(from date of birth)" : "(if exact date unknown)"}
+                      </span>
+                    </FieldLabel>
+                    <Input
+                      id="age"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="e.g. 30"
+                      value={ageDisplayValue}
+                      disabled={ageFieldDisabled}
+                      className={inputCls}
+                      onChange={(e) => handleAgeChange(e.target.value)}
+                    />
+                    {values.dobIsApproximate && values.dateOfBirth && (
+                      <p className="text-xs text-muted-foreground">
+                        Approximate — saved as {values.dateOfBirth}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col gap-2">
                     <FieldLabel htmlFor="gender" required>Gender</FieldLabel>

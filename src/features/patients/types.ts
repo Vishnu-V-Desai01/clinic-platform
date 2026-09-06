@@ -26,6 +26,7 @@ export interface PatientRecord {
   first_name: string
   last_name: string
   date_of_birth: string | null // "YYYY-MM-DD"
+  dob_is_approximate: boolean // true when derived from an entered Age rather than an exact date (Item 6)
   gender: Gender | null
   email: string | null
   phone: string
@@ -59,10 +60,16 @@ export interface PatientRecord {
 // enforces it in create mode; actions.ts's updatePatient ignores this
 // field entirely, since consent status for an existing patient is managed
 // via the patient portal's granular consent toggles, not the edit form.
+//
+// `dobIsApproximate` (Item 6): true when dateOfBirth was derived from an
+// entered Age (e.g. Age 30 -> "01/01/(currentYear-30)") rather than typed
+// directly. A manually edited dateOfBirth always forces this back to
+// false — see patient-form.tsx's handleDobChange.
 export interface PatientFormValues {
   firstName: string
   lastName: string
   dateOfBirth: string
+  dobIsApproximate: boolean
   gender: Gender | ""
   bloodGroup: BloodGroup | ""
   mrn: string

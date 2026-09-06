@@ -20,6 +20,7 @@ function toDbRow(data: PatientFormData, clinicId: string) {
     first_name:                     data.firstName,
     last_name:                      data.lastName,
     date_of_birth:                  data.dateOfBirth,
+    dob_is_approximate:             data.dobIsApproximate,
     gender:                         data.gender,
     blood_group:                    data.bloodGroup,
     status:                         data.status,

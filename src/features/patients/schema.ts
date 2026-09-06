@@ -78,6 +78,13 @@ export const patientFormSchema = z.object({
     .refine((v) => v === null || new Date(v) >= new Date("1900-01-01"), {
       message: "Enter a valid date",
     }),
+  // Item 6: true when dateOfBirth above was derived from an entered Age
+  // rather than typed directly. Shape-only validation here — a plain
+  // boolean, defaulting false. The actual sync rules (DOB wins when both
+  // are touched, Age only editable when no exact DOB is on file) live in
+  // patient-form.tsx; this schema just accepts whatever the form already
+  // resolved and persists it as-is.
+  dobIsApproximate: z.boolean().default(false),
   gender: z
     .string()
     .refine((v): v is Gender => GENDER_VALUES.includes(v as Gender), {
