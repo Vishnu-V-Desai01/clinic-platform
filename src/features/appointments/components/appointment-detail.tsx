@@ -17,7 +17,7 @@ import {
   statusLabel,
   durationLabel,
 } from "../types"
-import { updateAppointmentStatus } from "../actions"
+import { updateAppointmentStatus, viewPrescriptionDocument } from "../actions"
 import RescheduleDialog from "./reschedule-dialog"
 import CancelDialog from "./cancel-dialog"
 import SendPrescriptionDialog from "./send-prescription-dialog"
@@ -116,7 +116,9 @@ export default function AppointmentDetailView({
   const [cancelOpen,           setCancelOpen]           = useState(false)
   const [sendPrescriptionOpen, setSendPrescriptionOpen] = useState(false)
   const [statusError,          setStatusError]          = useState<string | null>(null)
+  const [viewRxError,          setViewRxError]          = useState<string | null>(null)
   const [isPending,            startTransition]         = useTransition()
+  const [isViewingRx,          startViewRxTransition]   = useTransition()
 
   function handleMarkStatus(status: "completed" | "no_show") {
     setStatusError(null)
@@ -127,6 +129,23 @@ export default function AppointmentDetailView({
         return
       }
       router.refresh()
+    })
+  }
+
+  // Ensures a clinic-side stored copy exists (idempotent — safe to call
+  // whether or not "Send Prescription" was ever used) and opens it in a
+  // new tab for viewing/printing. See viewPrescriptionDocument's comment
+  // in actions.ts for why this always creates a durable record rather
+  // than a one-off preview.
+  function handleViewPrescription() {
+    setViewRxError(null)
+    startViewRxTransition(async () => {
+      const result = await viewPrescriptionDocument(appointment.id)
+      if (!result.success) {
+        setViewRxError(result.error)
+        return
+      }
+      window.open(result.data.url, "_blank", "noopener,noreferrer")
     })
   }
 
@@ -201,15 +220,32 @@ export default function AppointmentDetailView({
         )}
 
         {/* Item 6: Send Prescription — only for completed visits with
-            active prescriptions on record. */}
+            active prescriptions on record.
+            Item 5 follow-up: View/Print Prescription sits alongside it —
+            available on the same condition, but does NOT require the
+            doctor to have ever sent it via WhatsApp. Clicking either
+            button independently guarantees the same stored clinic-side
+            copy exists (see viewPrescriptionDocument). */}
         {appointment.status === "completed" && appointment.prescriptionSummary?.hasActivePrescriptions && (
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              onClick={() => setSendPrescriptionOpen(true)}
-            >
-              Send Prescription
-            </Button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleViewPrescription}
+                disabled={isViewingRx}
+              >
+                {isViewingRx ? "Opening…" : "View / Print Prescription"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setSendPrescriptionOpen(true)}
+              >
+                Send Prescription
+              </Button>
+            </div>
+            {viewRxError && (
+              <p className="text-sm text-destructive">{viewRxError}</p>
+            )}
           </div>
         )}
 

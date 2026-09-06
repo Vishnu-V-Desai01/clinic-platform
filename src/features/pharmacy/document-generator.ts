@@ -14,10 +14,16 @@
 // redesigning it, so a medicine receipt still looked visually different
 // from a consultation receipt. This brings all three receipt-generating
 // paths to one consistent design.
+//
+// Item 5 (this chat): doctor name now goes through stripDoctorPrefix()
+// before the "Dr. " label + 26-char truncation, fixing "Dr. Dr Meera
+// Iyer" when the stored name already includes a "Dr"/"Dr." prefix.
+// Truncation still applies to the name only, not the "Dr. " label.
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
+import { stripDoctorPrefix } from '@/lib/format-helpers';
 
 function patientFullName(patients: any): string {
   return `${patients?.first_name || ''} ${patients?.last_name || ''}`.trim() || 'Unknown';
@@ -183,10 +189,13 @@ export async function generateMedicineReceipt(paymentId: string): Promise<Buffer
     page.drawLine({ start: { x: c2, y }, end: { x: c2 + cw, y }, thickness: 0.6, color: teal });
     y -= 14;
 
-    const doctorName = payment.profiles?.full_name || 'N/A';
+    const doctorNameStripped = stripDoctorPrefix(payment.profiles?.full_name || 'N/A');
+    const doctorNameDisplay = doctorNameStripped.length > 26
+      ? doctorNameStripped.slice(0, 26) + '...'
+      : doctorNameStripped;
     page.drawText(patientName, { x: c1, y, size: 12, font: fontBold, color: ink });
     page.drawText(
-      'Dr. ' + (doctorName.length > 26 ? doctorName.slice(0, 26) + '...' : doctorName),
+      'Dr. ' + doctorNameDisplay,
       { x: c2, y, size: 12, font: fontBold, color: ink }
     );
     y -= 15;

@@ -23,6 +23,12 @@
 // rather than computed from the browser clock — substituted lines' expiry
 // status is a plain string comparison against this value, same convention
 // used everywhere else expiry is checked in this codebase.
+//
+// Item 5 (this chat): doctor name now goes through formatDoctorName() to
+// avoid "Prescribed by Dr. Dr Meera Iyer" when the stored name already
+// includes a "Dr"/"Dr." prefix. Duration in the two prescription-detail
+// lines now goes through formatPrescriptionDuration() so a bare "3" shows
+// as "3 days".
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, PackageX, Search, TriangleAlert, X } from 'lucide-react'
@@ -59,6 +65,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { listInventory, rejectPrescription } from '../actions'
 import { PHARMACY_DRUG_FORM_LABELS, type PharmacyInventoryItem } from '../types'
+import { formatDoctorName, formatPrescriptionDuration } from '@/lib/format-helpers'
 
 export interface EncounterBillLine {
   prescriptionId: string
@@ -428,7 +435,7 @@ export default function EncounterBillDrawer({
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
           {group.doctorName && (
-            <p className="text-sm text-muted-foreground">Prescribed by Dr. {group.doctorName}</p>
+            <p className="text-sm text-muted-foreground">Prescribed by {formatDoctorName(group.doctorName)}</p>
           )}
 
           {visibleOriginalLines.length === 0 ? (
@@ -478,7 +485,7 @@ export default function EncounterBillDrawer({
                         )}
                         {(originalLine.dosage || originalLine.frequency || originalLine.duration) && (
                           <p className="text-xs text-muted-foreground">
-                            {[originalLine.dosage, originalLine.frequency, originalLine.duration].filter(Boolean).join(' · ')}
+                            {[originalLine.dosage, originalLine.frequency, formatPrescriptionDuration(originalLine.duration)].filter(Boolean).join(' · ')}
                           </p>
                         )}
 

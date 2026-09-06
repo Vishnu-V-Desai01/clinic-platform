@@ -1,7 +1,7 @@
 // src/features/post-visit/components/PrescriptionsCard.tsx
 //
 // Card 1 of 5 in the Post-Visit wizard.
-// Always controlled â€” wizard shell owns all state.
+// Always controlled — wizard shell owns all state.
 // Soft-deletes via isDeleted:true so the server can:
 //   - call deleteMedicine() on removed care-plan rows (carePlanMedicineId set)
 //   - skip newly-added rows that the doctor removed (no carePlanMedicineId)
@@ -16,32 +16,46 @@
 //   - Either path sets drugId on the line, which the pharmacy queue later
 //     uses to match reliably instead of case-insensitive name matching.
 //   - drugId is set ONLY by an explicit selection (dropdown click or picker
-//     click) and is cleared by any manual keystroke in the name field â€”
+//     click) and is cleared by any manual keystroke in the name field —
 //     this keeps drugId from ever silently pointing at a name that no
 //     longer matches what's displayed.
 //   - Free text remains fully supported: a medicine not in the catalogue,
 //     or a handwritten-prescription case, just leaves drugId unset. The
 //     pharmacy queue shows these as "Not in catalogue," which is expected.
-//   - The picker deliberately does NOT show stock levels â€” it queries the
+//   - The picker deliberately does NOT show stock levels — it queries the
 //     catalogue only (pharmacy_drugs, doctor-visible per the Chat A RLS
 //     split), never pharmacy_inventory, so a doctor without pharmacy_access
 //     never sees stock data through this component.
 //
 // Item 7 addition: a second autocomplete source layered onto the SAME
-// dropdown as the catalogue suggestions â€” distinct medicine names this
+// dropdown as the catalogue suggestions — distinct medicine names this
 // clinic has prescribed before, even ones never matched to a catalogue
 // drug. Fetched via a debounced server action (searchPastMedicineNames),
 // since past-prescription names live in a different table the catalogue
 // (already loaded client-side in full) doesn't cover. Catalogue matches
 // are listed first (richer detail available), then past-name matches not
 // already covered by a catalogue result, case-insensitively de-duplicated.
-// A past-name suggestion carries no drugId when selected â€” it's exactly
+// A past-name suggestion carries no drugId when selected — it's exactly
 // equivalent to typing that text manually, just faster.
 //
-// Step B addition: a "Searching previous prescriptionsâ€¦" row now shows in
+// Step B addition: a "Searching previous prescriptions…" row now shows in
 // the dropdown while the debounced past-name search is in flight, so the
 // user gets a visible pending state instead of a silent gap between typing
 // and results appearing.
+//
+// Item 5 (this chat): Duration is now a NUMBER input ("no. of days")
+// instead of free text, and is normalized to "N days"/"1 day" via
+// formatPrescriptionDuration() at the moment a medicine is added.
+//
+// Item 5 follow-up (this chat): the free-text Frequency dropdown
+// (Once daily, Twice daily, etc.) is REPLACED by three Morning/
+// Afternoon/Night toggles, per the doctor's own prescribing convention
+// (e.g. "0-1-0" meaning take in the afternoon only). Stored as a plain
+// "M-A-N" digit string directly in the existing `frequency` field — no
+// schema change, since frequency was never constrained to the old
+// dropdown's values at the database level. Every place that already
+// displays rx.frequency (Rx PDF, dispense drawer, encounter bill drawer)
+// continues to work unchanged, since it's still just a string.
 
 'use client'
 
@@ -58,40 +72,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Toggle } from '@/components/ui/toggle'
 import { listDrugs } from '@/features/pharmacy/actions'
 import { searchPastMedicineNames } from '../actions'
 import { PHARMACY_DRUG_FORM_LABELS, type PharmacyDrugRow } from '@/features/pharmacy/types'
 import type { PrescriptionLine } from '../types'
+import { formatPrescriptionDuration } from '@/lib/format-helpers'
 
 interface PrescriptionsCardProps {
   value:    PrescriptionLine[]
   onChange: (lines: PrescriptionLine[]) => void
 }
 
-const FREQUENCY_OPTIONS = [
-  'Once daily',
-  'Twice daily',
-  'Three times daily',
-  'Four times daily',
-  'Every 8 hours',
-  'Every 12 hours',
-  'Weekly',
-  'As needed',
-  'Nightly',
-]
-
 const emptyForm = {
   medicineName: '',
   drugId:       undefined as string | undefined,
   dosage:       '',
-  frequency:    '',
+  morning:      false,
+  afternoon:    false,
+  night:        false,
   duration:     '',
   instructions: '',
 }
@@ -110,15 +109,40 @@ function drugDisplayLabel(drug: PharmacyDrugRow): string {
 function drugSubLabel(drug: PharmacyDrugRow): string {
   const bits: string[] = [PHARMACY_DRUG_FORM_LABELS[drug.form]]
   if (drug.generic_name) bits.push(drug.generic_name)
-  return bits.join(' Â· ')
+  return bits.join(' · ')
 }
 
-// Collapses runs of internal whitespace and trims â€” applied on save so the
+// Collapses runs of internal whitespace and trims — applied on save so the
 // stored name is clean without ever changing its casing (a brand name like
 // "Crocin" shouldn't be lowercased just because search comparisons are
 // case-insensitive).
 function normalizeMedicineName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ')
+}
+
+// Builds the "M-A-N" dosage-timing string (e.g. "0-1-0") from the three
+// toggles. Whole numbers only per the doctor's own convention — no
+// half-dose support.
+function buildFrequencyCode(morning: boolean, afternoon: boolean, night: boolean): string | undefined {
+  if (!morning && !afternoon && !night) return undefined
+  return `${morning ? 1 : 0}-${afternoon ? 1 : 0}-${night ? 1 : 0}`
+}
+
+// Parses a stored "M-A-N" string back into toggle state, for pre-filled
+// lines (e.g. reopening the form to edit, or care-plan pre-fill data that
+// might already be in this format). Anything that doesn't match the exact
+// digit-dash-digit-dash-digit shape (legacy free-text values like "Once
+// daily" from before this change) is treated as "no toggles set" rather
+// than guessed at — legacy text is preserved as-is on the line itself and
+// simply isn't editable via the toggles.
+function parseFrequencyCode(raw: string | undefined): { morning: boolean; afternoon: boolean; night: boolean } {
+  const match = raw?.match(/^([01])-([01])-([01])$/)
+  if (!match) return { morning: false, afternoon: false, night: false }
+  return {
+    morning:   match[1] === '1',
+    afternoon: match[2] === '1',
+    night:     match[3] === '1',
+  }
 }
 
 export default function PrescriptionsCard({ value, onChange }: PrescriptionsCardProps) {
@@ -128,12 +152,12 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
   // Catalogue, fetched once. A doctor with no pharmacy_access still gets
   // this list (catalogue read stays doctor-visible per Chat A's RLS split);
   // an empty result (module disabled, or no drugs yet) just means the
-  // autocomplete/picker silently offer nothing â€” free text still works.
+  // autocomplete/picker silently offer nothing — free text still works.
   const [drugs, setDrugs]             = useState<PharmacyDrugRow[]>([])
   const [drugsLoaded, setDrugsLoaded] = useState(false)
 
   // Item 7: past-prescription-name suggestions, debounced against the
-  // server. Kept separate from the catalogue's instant in-memory filter â€”
+  // server. Kept separate from the catalogue's instant in-memory filter —
   // the catalogue has no network cost so it stays snappy; this one does,
   // so it gets its own debounce and minimum-length gate.
   const [pastNames, setPastNames]           = useState<string[]>([])
@@ -230,8 +254,8 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
       medicineName: cleanName,
       drugId:       form.drugId,
       dosage:       form.dosage.trim()       || undefined,
-      frequency:    form.frequency           || undefined,
-      duration:     form.duration.trim()     || undefined,
+      frequency:    buildFrequencyCode(form.morning, form.afternoon, form.night),
+      duration:     form.duration.trim() ? formatPrescriptionDuration(form.duration.trim()) : undefined,
       instructions: form.instructions.trim() || undefined,
       status:       'active',
       isDeleted:    false,
@@ -241,7 +265,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
     setShowForm(false)
   }
 
-  // Manual typing always invalidates any prior catalogue selection â€” drugId
+  // Manual typing always invalidates any prior catalogue selection — drugId
   // must only ever reflect an explicit pick, never a guess.
   const handleNameChange = (text: string) => {
     setForm((f) => ({ ...f, medicineName: text, drugId: undefined }))
@@ -254,7 +278,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
   }
 
   // Selecting a past-prescription-name suggestion is exactly equivalent to
-  // typing that text manually â€” no drugId, since it was never matched to
+  // typing that text manually — no drugId, since it was never matched to
   // a catalogue row (if it had been, it would show as a catalogue
   // suggestion instead and this path wouldn't apply).
   const selectPastName = (name: string) => {
@@ -288,7 +312,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
       <div>
         <h2 className="text-lg font-semibold text-foreground">Prescriptions</h2>
         <p className="text-sm text-muted-foreground">
-          Pre-filled from care plan Â· editable Â· changes sync back to care plan on save
+          Pre-filled from care plan · editable · changes sync back to care plan on save
         </p>
       </div>
 
@@ -323,7 +347,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                   {rx.dosage    && <Badge variant="secondary" className="text-xs">{rx.dosage}</Badge>}
                   {rx.frequency && <Badge variant="secondary" className="text-xs">{rx.frequency}</Badge>}
                   {rx.duration  && (
-                    <span className="text-xs text-muted-foreground">{rx.duration}</span>
+                    <span className="text-xs text-muted-foreground">{formatPrescriptionDuration(rx.duration)}</span>
                   )}
                 </div>
                 {rx.instructions && (
@@ -424,7 +448,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                           )}
                           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                             <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                            Searching previous prescriptionsâ€¦
+                            Searching previous prescriptions…
                           </div>
                         </>
                       )}
@@ -447,36 +471,57 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">Matched to pharmacy catalogue</p>
               )}
               {!drugsLoaded && (
-                <p className="text-xs text-muted-foreground">Loading catalogueâ€¦</p>
+                <p className="text-xs text-muted-foreground">Loading catalogue…</p>
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="pv-med-dosage">Dosage</Label>
-                <Input
-                  id="pv-med-dosage"
-                  placeholder="e.g. 500 mg"
-                  value={form.dosage}
-                  onChange={(e) => setForm({ ...form, dosage: e.target.value })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="pv-med-freq">Frequency</Label>
-                <Select
-                  value={form.frequency}
-                  onValueChange={(v) => setForm({ ...form, frequency: v })}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="pv-med-dosage">Dosage</Label>
+              <Input
+                id="pv-med-dosage"
+                placeholder="e.g. 500 mg"
+                value={form.dosage}
+                onChange={(e) => setForm({ ...form, dosage: e.target.value })}
+              />
+            </div>
+
+            {/* Item 5 follow-up: Morning / Afternoon / Night toggles,
+                replacing the old free-text Frequency dropdown. Stored as
+                an "M-A-N" digit string (e.g. "0-1-0") in the same
+                `frequency` field. */}
+            <div className="flex flex-col gap-1.5">
+              <Label>Timing</Label>
+              <div className="flex gap-2">
+                <Toggle
+                  pressed={form.morning}
+                  onPressedChange={(pressed) => setForm({ ...form, morning: pressed })}
+                  className="flex-1 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  aria-label="Morning dose"
                 >
-                  <SelectTrigger id="pv-med-freq">
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FREQUENCY_OPTIONS.map((opt) => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  Morning
+                </Toggle>
+                <Toggle
+                  pressed={form.afternoon}
+                  onPressedChange={(pressed) => setForm({ ...form, afternoon: pressed })}
+                  className="flex-1 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  aria-label="Afternoon dose"
+                >
+                  Afternoon
+                </Toggle>
+                <Toggle
+                  pressed={form.night}
+                  onPressedChange={(pressed) => setForm({ ...form, night: pressed })}
+                  className="flex-1 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  aria-label="Night dose"
+                >
+                  Night
+                </Toggle>
               </div>
+              {(form.morning || form.afternoon || form.night) && (
+                <p className="text-xs text-muted-foreground">
+                  Will print as {buildFrequencyCode(form.morning, form.afternoon, form.night)}
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -484,7 +529,9 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
                 <Label htmlFor="pv-med-dur">Duration</Label>
                 <Input
                   id="pv-med-dur"
-                  placeholder="e.g. 7 days"
+                  type="number"
+                  min={1}
+                  placeholder="no. of days"
                   value={form.duration}
                   onChange={(e) => setForm({ ...form, duration: e.target.value })}
                 />
@@ -528,7 +575,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
             <Input
               value={pickerSearch}
               onChange={(e) => setPickerSearch(e.target.value)}
-              placeholder="Search medicinesâ€¦"
+              placeholder="Search medicines…"
               className="pl-9"
               autoFocus
             />
@@ -536,7 +583,7 @@ export default function PrescriptionsCard({ value, onChange }: PrescriptionsCard
 
           <div className="max-h-80 overflow-y-auto rounded-md border border-border">
             {!drugsLoaded ? (
-              <p className="p-4 text-center text-sm text-muted-foreground">Loadingâ€¦</p>
+              <p className="p-4 text-center text-sm text-muted-foreground">Loading…</p>
             ) : pickerResults.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
                 {drugs.length === 0 ? 'No medicines in the catalogue yet.' : 'No medicines match your search.'}

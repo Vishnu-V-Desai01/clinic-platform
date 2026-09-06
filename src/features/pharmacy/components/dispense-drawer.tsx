@@ -11,6 +11,11 @@
 // - data-icon="inline-start" replaced with explicit className spacing.
 // - Drug name/strength/form line and stock-unit label now guard against
 //   null/empty values instead of assuming they're always present.
+//
+// Item 5 (this chat): doctor name now goes through formatDoctorName() to
+// avoid "Prescribed by Dr. Dr Meera Iyer" when the stored name already
+// includes a "Dr"/"Dr." prefix. Duration in the summary line now goes
+// through formatPrescriptionDuration() so a bare "3" shows as "3 days".
 
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, PackageX, TriangleAlert, X } from 'lucide-react'
@@ -30,6 +35,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { formatDoctorName, formatPrescriptionDuration } from '@/lib/format-helpers'
 
 export interface DispensePrescription {
   id: string
@@ -155,14 +161,14 @@ export default function DispenseDrawer({
             <div>
               <p className="font-medium text-foreground">{prescription.patientName}</p>
               {prescription.patientSubtitle && <p className="text-xs text-muted-foreground">{prescription.patientSubtitle}</p>}
-              <p className="mt-2 text-sm text-muted-foreground">Prescribed by Dr. {prescription.doctorName}</p>
+              <p className="mt-2 text-sm text-muted-foreground">Prescribed by {formatDoctorName(prescription.doctorName)}</p>
             </div>
             <p className="text-sm font-medium text-foreground">
               {formatDrugLine(prescription.drugName, prescription.strength, prescription.form)}
             </p>
             {(prescription.dosage || prescription.frequency || prescription.duration) && (
               <p className="text-sm text-foreground">
-                {[prescription.dosage, prescription.frequency, prescription.duration].filter(Boolean).join(' · ')}
+                {[prescription.dosage, prescription.frequency, formatPrescriptionDuration(prescription.duration)].filter(Boolean).join(' · ')}
               </p>
             )}
             {prescription.instructions && <p className="border-t border-border pt-2 text-sm text-muted-foreground">{prescription.instructions}</p>}

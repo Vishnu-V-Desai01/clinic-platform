@@ -737,3 +737,73 @@ export async function sendPrescriptionMessage(
     return { success: false, error: "Failed to send prescription." }
   }
 }
+// ============================================================================
+// viewPrescriptionDocument (Item 5 follow-up)
+//
+// Guarantees a clinic-side, unalterable copy of the prescription exists —
+// separate from whether the doctor has ever clicked "Send Prescription" to
+// WhatsApp the patient a link. Calling this always ensures a stored
+// document row exists (generateAndStorePrescriptionDocument is idempotent
+// — a second call for the same encounter returns the existing row rather
+// than duplicating), then returns a short-lived signed URL so the doctor
+// can view/print it. The storage bucket is private, so a signed URL (not
+// a permanent public link) is required — same pattern already used for
+// the patient-facing download link, just scoped to staff and expiring
+// much sooner since this is opened immediately, not saved for later.
+// ============================================================================
+export async function viewPrescriptionDocument(
+  appointmentId: string,
+): Promise<Result<{ url: string }>> {
+  const profile = await requireRole("doctor", "staff")
+
+  try {
+    const supabase = createServerSupabaseClient()
+
+    const { data: appointment, error: aptError } = await supabase
+      .from("appointments")
+      .select("id, status")
+      .eq("id", appointmentId)
+      .eq("clinic_id", profile.clinic_id)
+      .is("deleted_at", null)
+      .single()
+
+    if (aptError || !appointment) {
+      return { success: false, error: "Appointment not found." }
+    }
+    if (appointment.status !== "completed") {
+      return { success: false, error: "Prescriptions are only available for completed visits." }
+    }
+
+    const { data: encounter, error: encError } = await supabase
+      .from("encounters")
+      .select("id")
+      .eq("appointment_id", appointmentId)
+      .eq("clinic_id", profile.clinic_id)
+      .maybeSingle()
+
+    if (encError || !encounter) {
+      return { success: false, error: "No visit record found for this appointment." }
+    }
+
+    const { generateAndStorePrescriptionDocument } = await import("./document-storage")
+    const doc = await generateAndStorePrescriptionDocument(encounter.id)
+
+    if (!doc) {
+      return { success: false, error: "Failed to generate the prescription document." }
+    }
+
+    const { data: signed, error: signError } = await supabase.storage
+      .from("clinic-documents")
+      .createSignedUrl(doc.file_path, 300) // 5 minutes — opened immediately, not saved for later
+
+    if (signError || !signed) {
+      console.error("[viewPrescriptionDocument] Signed URL creation failed:", signError)
+      return { success: false, error: "Failed to create a link for the document." }
+    }
+
+    return { success: true, data: { url: signed.signedUrl } }
+  } catch (err) {
+    console.error("[viewPrescriptionDocument]", err)
+    return { success: false, error: "Failed to load the prescription document." }
+  }
+}
