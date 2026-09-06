@@ -17,10 +17,19 @@
 // that diff and would never actually be removed server-side. A brand-new
 // line (no id yet, never saved) is still just removed from the array
 // outright, since there's nothing on the server to tell to delete.
+//
+// Item 7a: a "Insert snippet…" dropdown sits beside the Clinical notes
+// label, pulling the doctor's own saved snippets (doctor-scoped — see
+// features/clinical-snippets). Selecting one inserts its body at the
+// current cursor position in the notes textarea (or the end, if nothing
+// is focused) — it never overwrites text already typed, only adds to it.
+// A "Manage snippets" link opens the dedicated management page in a new
+// tab so the doctor doesn't lose their place mid-visit.
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { Plus, X } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -33,6 +42,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { listSnippetsForInsert } from '@/features/clinical-snippets/actions'
+import type { ClinicalNoteSnippet } from '@/features/clinical-snippets/types'
 import type {
   EncounterData,
   DiagnosisLine,
@@ -81,11 +92,51 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
   const [diagForm, setDiagForm]         = useState(EMPTY_DIAG_FORM)
   const [obsForm,  setObsForm]          = useState(EMPTY_OBS_FORM)
 
+  // Item 7a: snippets for the insert dropdown, fetched once on mount.
+  const [snippets, setSnippets]       = useState<ClinicalNoteSnippet[]>([])
+  const [snippetsLoaded, setSnippetsLoaded] = useState(false)
+  const notesTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listSnippetsForInsert().then((result) => {
+      if (cancelled) return
+      if (result.success) setSnippets(result.data)
+      setSnippetsLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [])
+
   const patch = (p: EncounterPatch) => onChange({ ...value, ...p })
 
   // Visible (not soft-deleted) lines, for rendering only.
   const visibleDiagnoses    = value.diagnoses.filter((d) => !d.isDeleted)
   const visibleObservations = value.observations.filter((o) => !o.isDeleted)
+
+  // ── Snippet insert (Item 7a) ─────────────────────────────────────────
+  // Inserts at the textarea's current cursor position, never overwriting
+  // existing typed text. Falls back to appending at the end if the
+  // textarea isn't focused (selectionStart unset).
+  const handleInsertSnippet = (snippet: ClinicalNoteSnippet) => {
+    const textarea = notesTextareaRef.current
+    const current  = value.notes ?? ''
+    const cursorPos = textarea?.selectionStart ?? current.length
+    const before = current.slice(0, cursorPos)
+    const after  = current.slice(cursorPos)
+    const needsLeadingBreak = before.length > 0 && !before.endsWith('\n')
+    const insertion = (needsLeadingBreak ? '\n' : '') + snippet.body
+    const newValue = before + insertion + after
+
+    patch({ notes: newValue || undefined })
+
+    requestAnimationFrame(() => {
+      if (textarea) {
+        const newCursorPos = before.length + insertion.length
+        textarea.focus()
+        textarea.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    })
+  }
 
   // ── Diagnosis handlers ────────────────────────────────────────────────
 
@@ -182,9 +233,37 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
 
       {/* Clinical notes */}
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="pv-notes">Clinical notes</Label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Label htmlFor="pv-notes">Clinical notes</Label>
+          <div className="flex items-center gap-3">
+            {snippetsLoaded && snippets.length > 0 && (
+              <Select onValueChange={(id) => {
+                const snippet = snippets.find((s) => s.id === id)
+                if (snippet) handleInsertSnippet(snippet)
+              }}>
+                <SelectTrigger className="h-8 w-48 text-xs">
+                  <SelectValue placeholder="Insert snippet…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {snippets.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Link
+              href="/dashboard/snippets"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline"
+            >
+              Manage snippets
+            </Link>
+          </div>
+        </div>
         <Textarea
           id="pv-notes"
+          ref={notesTextareaRef}
           placeholder="Findings, examination notes, plan…"
           rows={4}
           value={value.notes ?? ''}

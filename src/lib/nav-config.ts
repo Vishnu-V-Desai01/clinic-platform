@@ -10,6 +10,7 @@ import {
   Settings,
   BarChart3,
   Pill,
+  NotebookPen,
 } from 'lucide-react'
 import type { Role } from '@/lib/supabase/profile'
 export type NavItem = {
@@ -26,6 +27,10 @@ export const navByRole: Record<Role, NavItem[]> = {
     { title: 'Appointments', href: '/dashboard/appointments', icon: Calendar },
     { title: 'Payments', href: '/dashboard/payments', icon: Receipt },
     { title: 'Charge Approvals', href: '/dashboard/payments/approvals', icon: ClipboardCheck },
+    // Item 7a: doctor-only, doctor-scoped clinical note snippets — not
+    // shown to staff, since staff have no clinical documentation access
+    // anywhere else in the app either.
+    { title: 'My Snippets', href: '/dashboard/snippets', icon: NotebookPen },
     { title: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
     // Settings moved to admin nav — clinic configuration is an admin responsibility
   ],
