@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import { Calendar, Clock, Check, ChevronsUpDown } from "lucide-react"
+import { Calendar, Check, ChevronsUpDown } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -37,6 +37,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import TimePicker, { convertTo24Hour, type TimePeriod } from "@/components/time-picker"
 
 import { createAppointment } from "../actions"
 import { DURATION_OPTIONS, type DoctorOption } from "../types"
@@ -69,7 +70,10 @@ export default function NewAppointmentDialog({
   const [patientId,          setPatientId]          = React.useState("")
   const [doctorId,           setDoctorId]           = React.useState("")
   const [date,               setDate]               = React.useState("")
-  const [time,               setTime]               = React.useState("")
+  const [hour,               setHour]               = React.useState("9")
+  const [minute,             setMinute]             = React.useState("00")
+  const [period,             setPeriod]             = React.useState<TimePeriod>("AM")
+  const [timeValid,          setTimeValid]          = React.useState(true)
   const [duration,           setDuration]           = React.useState(30)
   const [chiefComplaint,     setChiefComplaint]     = React.useState("")
   const [patientPopoverOpen, setPatientPopoverOpen] = React.useState(false)
@@ -83,7 +87,10 @@ export default function NewAppointmentDialog({
       setPatientId("")
       setDoctorId("")
       setDate("")
-      setTime("")
+      setHour("9")
+      setMinute("00")
+      setPeriod("AM")
+      setTimeValid(true)
       setDuration(30)
       setChiefComplaint("")
       setError(null)
@@ -92,17 +99,18 @@ export default function NewAppointmentDialog({
 
   const selectedPatient = patients.find((p) => p.id === patientId)
   const selectedDoctor  = doctors.find((d) => d.id === doctorId)
-  const isValid         = patientId !== "" && doctorId !== "" && date !== "" && time !== ""
+  const isValid         = patientId !== "" && doctorId !== "" && date !== "" && timeValid
 
   function handleSubmit() {
     if (!isValid || isPending) return
     setError(null)
+    const appointmentTime = convertTo24Hour(hour, minute, period)
     startTransition(async () => {
       const result = await createAppointment({
         patientId,
         doctorId,
         appointmentDate: date,
-        appointmentTime: time,
+        appointmentTime,
         durationMinutes: duration,
         chiefComplaint,
       })
@@ -181,7 +189,7 @@ export default function NewAppointmentDialog({
             </Popover>
           </div>
 
-          {/* Doctor — searchable combobox (was missing from v0) */}
+          {/* Doctor — searchable combobox */}
           <div className="flex flex-col gap-2">
             <Label>Doctor <RequiredMark /></Label>
             <Popover open={doctorPopoverOpen} onOpenChange={setDoctorPopoverOpen}>
@@ -239,36 +247,36 @@ export default function NewAppointmentDialog({
             </Popover>
           </div>
 
-          {/* Date + Time */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apt-date">Date <RequiredMark /></Label>
-              <div className="relative">
-                <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="apt-date"
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-9"
-                  disabled={isPending}
-                />
-              </div>
+          {/* Date */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="apt-date">Date <RequiredMark /></Label>
+            <div className="relative">
+              <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="apt-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="pl-9"
+                disabled={isPending}
+              />
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apt-time">Time <RequiredMark /></Label>
-              <div className="relative">
-                <Clock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="apt-time"
-                  type="time"
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="pl-9"
-                  disabled={isPending}
-                />
-              </div>
-            </div>
+          </div>
+
+          {/* Time — 12-hour with AM/PM, shared TimePicker component (Item 1) */}
+          <div className="flex flex-col gap-2">
+            <Label>Time <RequiredMark /></Label>
+            <TimePicker
+              hour={hour}
+              minute={minute}
+              period={period}
+              onHourChange={setHour}
+              onMinuteChange={setMinute}
+              onPeriodChange={setPeriod}
+              onValidityChange={setTimeValid}
+              disabled={isPending}
+              idPrefix="apt-new-time"
+            />
           </div>
 
           {/* Duration */}
