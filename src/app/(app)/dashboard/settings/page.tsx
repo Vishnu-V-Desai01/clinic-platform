@@ -8,7 +8,6 @@ import { getAutoSendConsultationReceiptsSetting } from '@/features/payments/acti
 import ClinicSettingsForm from '@/features/clinic/components/clinic-settings-form';
 import PharmacyMessagingSettingsCard from '@/features/pharmacy/components/pharmacy-messaging-settings-card';
 import ConsultationMessagingSettingsCard from '@/features/payments/components/consultation-messaging-settings-card';
-import ManualReminderTriggerCard from '@/features/reminders/components/manual-reminder-trigger-card';
 export const metadata = { title: 'Clinic Settings' };
 export default async function SettingsPage() {
   const profile = await getOrCreateProfile();
@@ -76,7 +75,6 @@ export default async function SettingsPage() {
             canEdit={profile.is_clinic_admin}
           />
         )}
-        <ManualReminderTriggerCard canEdit={profile.is_clinic_admin} />
       </div>
     </div>
   );
