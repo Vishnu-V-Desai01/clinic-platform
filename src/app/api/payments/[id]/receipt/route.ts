@@ -8,6 +8,35 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getOrCreateProfile } from '@/lib/supabase/profile';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
+// Shape of the clinic header block. Identical whether it arrives from the
+// direct clinics select (clinic members) or the SECURITY DEFINER RPC
+// (patients), so everything downstream is unchanged.
+interface ClinicHeader {
+  name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  phone: string | null;
+  email: string | null;
+  license_number: string | null;
+  gst_number: string | null;
+  hfr_id: string | null;
+}
+
+// Shape returned by get_patient_receipt_extras_for_my_payment — the doctor
+// name and line items a patient can't otherwise read (see comment below).
+interface PatientReceiptExtras {
+  doctor_name: string | null;
+  line_items: {
+    description: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    sort_order: number;
+  }[];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -61,36 +90,95 @@ export async function GET(
     return new NextResponse('Payment not found', { status: 404 });
   }
 
-  // Uses payment.clinic_id, not profile.clinic_id — for doctor/staff these
-  // are already guaranteed identical by the filter above, so this is a
-  // no-op change for them. For patients (profile.clinic_id is null) this
-  // is the actual fix: it resolves the real clinic regardless of caller role.
-  // show_branding_footer is no longer selected — Item 9 removed the
-  // disable-watermark setting; the watermark is now unconditional, so
-  // this column is never read here. The column itself remains in the DB
-  // (additive-only migrations), just deprecated and unused.
-  const { data: clinic } = await supabase
-    .from('clinics')
-    .select('name, address, city, state, postal_code, phone, email, license_number, gst_number, hfr_id')
-    .eq('id', payment.clinic_id)
-    .single();
+  // ── CLINIC HEADER + PATIENT-ONLY EXTRAS ─────────────────────────────────
+  // Two paths, because clinics/profiles/payment_line_items are each
+  // clinic_id-scoped by RLS:
+  //   clinics:             clinic_members_select_own       id = get_my_clinic_id()
+  //   profiles:             profiles_clinic_members_view_each_other  clinic_id = get_my_clinic_id()
+  //   payment_line_items:   line_items_clinic_access        clinic_id = get_my_clinic_id()
+  //
+  // For a patient-portal profile get_my_clinic_id() is NULL, so every one
+  // of those predicates is NULL for every row: each query/join returns
+  // ZERO ROWS for a patient, not an error. That's why the portal receipt
+  // previously showed the 'Clinic' name fallback, 'Dr. N/A', and a plain
+  // single-line service description instead of the itemised table —
+  // three symptoms of the exact same RLS-invisibility pattern, not three
+  // separate bugs.
+  //
+  // Clinic members keep the original direct queries (unchanged behaviour).
+  // Patients go through two narrow SECURITY DEFINER functions instead —
+  // get_clinic_header_for_my_payment (clinic display fields) and
+  // get_patient_receipt_extras_for_my_payment (doctor name + line items)
+  // — each independently gated on the payment's patient being linked to
+  // the caller's own family account. No table's RLS is loosened.
+  //
+  // show_branding_footer is not selected — Item 9 removed the
+  // disable-watermark setting; the watermark is unconditional, so the
+  // column is never read here. It remains in the DB (additive-only
+  // migrations), just deprecated and unused.
+  let clinic: ClinicHeader | null = null;
+  let patientExtras: PatientReceiptExtras | null = null;
 
-  // Fetch line items — backward compatible (may be empty for old charges).
-  // Same payment.clinic_id fix as the clinic lookup above. Note: if
-  // payment_line_items' own RLS policies (Chat 10) don't yet include a
-  // patient-facing SELECT policy, this will simply return empty for a
-  // patient caller — hasLineItems below already handles that gracefully
-  // by falling back to the single-description rendering, so this doesn't
-  // break the receipt, just potentially renders it less itemized.
-  const { data: lineItemsRaw } = await supabase
-    .from('payment_line_items')
-    .select('*')
-    .eq('payment_id', paymentId)
-    .eq('clinic_id', payment.clinic_id)
-    .order('sort_order', { ascending: true });
+  if (isClinicMember) {
+    const { data: clinicRow, error: clinicError } = await supabase
+      .from('clinics')
+      .select(
+        'name, address, city, state, postal_code, phone, email, license_number, gst_number, hfr_id'
+      )
+      .eq('id', payment.clinic_id)
+      .single();
 
-  const lineItems: any[]  = lineItemsRaw || [];
-  const hasLineItems      = lineItems.length > 0;
+    if (clinicError) {
+      // Previously discarded. Logging it is what would have surfaced this
+      // bug immediately rather than it reaching a pilot clinic's patients.
+      console.error('[receipt/route] clinic lookup failed (member):', clinicError);
+    }
+
+    clinic = (clinicRow as ClinicHeader | null) ?? null;
+  } else {
+    const { data: clinicJson, error: clinicError } = await supabase.rpc(
+      'get_clinic_header_for_my_payment',
+      { p_payment_id: paymentId }
+    );
+
+    if (clinicError) {
+      console.error('[receipt/route] clinic lookup failed (patient):', clinicError);
+    }
+
+    clinic = (clinicJson as ClinicHeader | null) ?? null;
+
+    const { data: extrasJson, error: extrasError } = await supabase.rpc(
+      'get_patient_receipt_extras_for_my_payment',
+      { p_payment_id: paymentId }
+    );
+
+    if (extrasError) {
+      console.error('[receipt/route] receipt extras lookup failed (patient):', extrasError);
+    }
+
+    patientExtras = (extrasJson as PatientReceiptExtras | null) ?? null;
+  }
+
+  // Fetch line items. Clinic members: direct query, unchanged. Patients:
+  // from get_patient_receipt_extras_for_my_payment above — the direct
+  // query would return empty for them (line_items_clinic_access RLS, see
+  // comment above), same reasoning as the clinic-header split.
+  let lineItems: any[];
+
+  if (isPatient) {
+    lineItems = patientExtras?.line_items ?? [];
+  } else {
+    const { data: lineItemsRaw } = await supabase
+      .from('payment_line_items')
+      .select('*')
+      .eq('payment_id', paymentId)
+      .eq('clinic_id', payment.clinic_id)
+      .order('sort_order', { ascending: true });
+
+    lineItems = lineItemsRaw || [];
+  }
+
+  const hasLineItems = lineItems.length > 0;
 
   try {
     const pdfDoc  = await PDFDocument.create();
@@ -102,7 +190,7 @@ export async function GET(
     const margin = 40;
     const inner  = width - margin * 2;
 
-    // ── Design tokens ─────────────────────────────────────────────
+    // ── Design tokens ──────────────────────────────────────────────────
     const teal     = rgb(0.05, 0.52, 0.52);
     const tealDk   = rgb(0.03, 0.38, 0.38);
     const tealTint = rgb(0.92, 0.98, 0.98);
@@ -134,7 +222,7 @@ export async function GET(
 
     const collections: any[] = payment.payment_collections || [];
 
-    // ── 1. HEADER ─────────────────────────────────────────────────
+    // ── 1. HEADER ──────────────────────────────────────────────────────
     const HH = 90;
     page.drawRectangle({ x: 0, y: height - HH, width, height: HH, color: teal });
     page.drawRectangle({ x: 0, y: height - 5,  width, height: 5,  color: tealDk });
@@ -180,7 +268,7 @@ export async function GET(
       size: 38, font: fontBold, color: white, opacity: 0.10,
     });
 
-    // ── 2. META BAR ───────────────────────────────────────────────
+    // ── 2. META BAR ────────────────────────────────────────────────────
     const MB  = 40;
     const mbY = height - HH - MB;
     page.drawRectangle({ x: 0, y: mbY, width, height: MB, color: tealTint });
@@ -215,7 +303,7 @@ export async function GET(
 
     let y = mbY - 24;
 
-    // ── 3. BILLED TO / SERVICE ───────────────────────────────────
+    // ── 3. BILLED TO / SERVICE ─────────────────────────────────────────
     const c1 = margin;
     const c2 = width / 2 + 8;
     const cw = width / 2 - margin - 8;
@@ -263,7 +351,14 @@ export async function GET(
     }
     y -= 13;
 
-    const doctorName = payment.profiles?.full_name || 'N/A';
+    // Clinic members: existing joined profiles.full_name (unchanged).
+    // Patients: from get_patient_receipt_extras_for_my_payment above —
+    // the joined profiles.full_name is invisible to them under RLS (see
+    // comment above), so it always rendered 'N/A' regardless of whether
+    // the payment actually had a treating doctor on file.
+    const doctorName = isPatient
+      ? (patientExtras?.doctor_name || 'N/A')
+      : (payment.profiles?.full_name || 'N/A');
     page.drawText(
       'Dr. ' +
         (doctorName.length > 26 ? doctorName.slice(0, 26) + '...' : doctorName),
@@ -271,7 +366,7 @@ export async function GET(
     );
     y -= 22;
 
-    // ── 4. ITEMISED BILL TABLE (only when line items exist) ──────
+    // ── 4. ITEMISED BILL TABLE (only when line items exist) ────────────
     if (hasLineItems) {
       // Section label
       page.drawText('ITEMISED BILL', {
@@ -285,7 +380,7 @@ export async function GET(
       y -= 2;
 
       // Column positions
-      const rightEdge = margin + inner;       // 555
+      const rightEdge = margin + inner;        // 555
       const qtyRight  = margin + inner * 0.52; // ~307
       const upRight   = margin + inner * 0.77; // ~437
       // totalRight = rightEdge (555)
@@ -409,7 +504,7 @@ export async function GET(
       y -= 8; // existing charges without line items: small gap before summary box
     }
 
-    // ── 5. AMOUNT SUMMARY BOX ────────────────────────────────────
+    // ── 5. AMOUNT SUMMARY BOX ──────────────────────────────────────────
     const boxH = 80;
     const boxY = y - boxH;
     const t3   = inner / 3;
@@ -488,7 +583,7 @@ export async function GET(
 
     y = boxY - 24;
 
-    // ── 6. COLLECTION HISTORY TABLE ──────────────────────────────
+    // ── 6. COLLECTION HISTORY TABLE ────────────────────────────────────
     if (collections.length > 0) {
       page.drawText('COLLECTION HISTORY', {
         x: margin, y, size: 6.5, font: fontBold, color: teal,
@@ -554,7 +649,7 @@ export async function GET(
       y -= 8;
     }
 
-    // ── 7. FOOTER ─────────────────────────────────────────────────
+    // ── 7. FOOTER ──────────────────────────────────────────────────────
     const ftY = 48;
     page.drawLine({
       start: { x: margin, y: ftY + 30 },

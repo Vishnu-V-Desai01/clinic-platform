@@ -54,6 +54,17 @@ function formatPhoneWithCountryCode(phone: string, countryCode: string): string 
   return phone.startsWith(code) ? phone : `${code}${phone}`;
 }
 
+// Placeholder text sent in the {EMAIL} slot of the registration WhatsApp
+// message when the patient has no email on file yet. Registration only
+// requires a WhatsApp number (see toDbRow / patient-form.tsx) — email is
+// intentionally deferred to the patient's own portal sign-up, so this is
+// the expected, common case, not an error state. The {EMAIL} parameter
+// itself is a normal WhatsApp template variable (see provider-mapping.ts:
+// extractPlaceholderOrder pulls positions from the template content
+// string at send time), so swapping in a different value here needs no
+// Meta template resubmission — only the substituted text changes.
+const NO_EMAIL_ON_FILE_PLACEHOLDER = "Sign up by adding your email";
+
 // DPDP consent gate: shared error text used at every create*Message and
 // sendMessage call site below, so the two enforcement points (creation
 // and send) can never drift apart in wording. A missing/revoked
@@ -252,9 +263,17 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
     return { success: false, error: "Patient has no phone number on file" };
   }
 
-  if (!patient.email) {
-    return { success: false, error: "Patient has no email on file" };
-  }
+  // Email is NOT required to register a patient — WhatsApp number is the
+  // only required identifier at clinic intake, by design. The patient
+  // adds their own email later, during their own portal sign-up. So a
+  // missing email here is the expected common case, not a block: the
+  // {EMAIL} placeholder gets a sign-up prompt instead of an address, and
+  // the registration message still sends. (Previously this function
+  // returned success:false and refused to queue the message at all when
+  // email was blank — which, combined with createPatient's after() block
+  // only logging thrown exceptions and never inspecting this function's
+  // return value, meant every phone-only registration silently produced
+  // no registration message and no visible error anywhere.)
 
   const { data: clinic, error: clinicError } = await supabase
     .from("clinics")
@@ -274,8 +293,8 @@ export async function createRegistrationMessage(input: CreateRegistrationMessage
   const placeholders: RegistrationPlaceholders = {
     CLINIC_NAME: clinic.name,
     PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
-    EMAIL: patient.email,
-   LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient-portal`,
+    EMAIL: patient.email || NO_EMAIL_ON_FILE_PLACEHOLDER,
+    LOGIN_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient-portal`,
   };
 
   // Generate the id client-side and skip the post-insert .select() re-read.
@@ -663,7 +682,7 @@ export async function regeneratePaymentDocumentLinks(input: CreateReceiptMessage
 
   for (const doc of typedDocuments) {
     if (!profile.clinic_id) return { success: false, error: 'Clinic not found on profile.' }
-const token = await regenerateDocumentLink(supabase, doc.id, profile.clinic_id, profile.id);
+    const token = await regenerateDocumentLink(supabase, doc.id, profile.clinic_id, profile.id);
     if (token) {
       links[doc.document_type] = buildPublicDocumentUrl(token);
     }

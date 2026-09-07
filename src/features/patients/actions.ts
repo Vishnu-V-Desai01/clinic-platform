@@ -202,8 +202,31 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
         console.error('[createPatient] Consent grant failed:', err)
       }
 
+      // Previously: the return value of createRegistrationMessage was
+      // never inspected — only a thrown exception was caught here. But
+      // createRegistrationMessage fails by RETURNING
+      // { success: false, error: '...' } for every one of its guard
+      // clauses (no phone on file, no active consent, clinic not found,
+      // insert error, etc.) — it never throws for those cases. That made
+      // every such failure completely invisible: no UI error (this whole
+      // block runs after the HTTP response has already been sent), no
+      // server log, nothing. This is what let the missing-email gate
+      // (now removed — see NO_EMAIL_ON_FILE_PLACEHOLDER in
+      // messaging/actions.ts) silently block every phone-only
+      // registration's message with zero trace.
+      //
+      // Now logs any non-success result with its actual reason, so a
+      // future failure here — for any cause — shows up in server/Vercel
+      // logs instead of only being discoverable by noticing an empty
+      // Messages screen days later.
       try {
-        await createRegistrationMessage({ patientId })
+        const messageResult = await createRegistrationMessage({ patientId })
+        if (!messageResult.success) {
+          console.error(
+            '[createPatient] Registration message not created:',
+            messageResult.error,
+          )
+        }
       } catch (err) {
         console.error('[createPatient] Registration message failed:', err)
       }
