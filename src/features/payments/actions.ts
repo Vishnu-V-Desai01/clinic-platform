@@ -2,6 +2,7 @@
 
 'use server';
 
+import { after } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { getOrCreateProfile, requireRole } from '@/lib/supabase/profile';
@@ -52,7 +53,7 @@ function descriptionFromLineItems(items: Array<{ description: string }>): string
   return items[0].description + ' (and ' + (items.length - 1) + ' more)';
 }
 
-// A doctor submitting can only ever attribute the row to themselves — the
+// A doctor submitting can only ever attribute the row to themselves â€” the
 // client's value is ignored entirely for that role, so there's no way to
 // tamper with the request to attribute someone else's work. Staff must
 // explicitly choose a doctor. Same rule, used for both charge creation
@@ -66,20 +67,20 @@ function resolveDoctorId(
   return { error: 'Please select a doctor.' };
 }
 
-// ── Payment visibility scoping (Issue 2, re-scoped) ─────────────────────────
+// â”€â”€ Payment visibility scoping (Issue 2, re-scoped) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Admin and staff see all clinic payments. A doctor sees only payments
-// where THEY are the doctor on that payment (payments.doctor_id) — not
+// where THEY are the doctor on that payment (payments.doctor_id) â€” not
 // payments for "their" patients in general. This deliberately does NOT
 // route through patients.assigned_doctor_id: Doctor B doing a one-off
 // charge for Doctor A's patient must see that payment in their own view,
 // since they're the one who actually performed the billed service. This
-// is query-layer defence in depth — the RLS policy
+// is query-layer defence in depth â€” the RLS policy
 // payments_select_clinic_staff_doctor enforces the same rule at the
 // database layer independently.
 //
 // Returns { restricted: false } for admin/staff. Returns
-// { restricted: true, doctorId } for a doctor — callers filter with
+// { restricted: true, doctorId } for a doctor â€” callers filter with
 // .eq('doctor_id', doctorId), a direct column match with no subquery.
 type DoctorScope =
   | { restricted: false }
@@ -94,7 +95,7 @@ function getPaymentVisibilityScope(
   return { restricted: true, doctorId: profile.id };
 }
 
-// ── Read functions ────────────────────────────────────────────────────────────
+// â”€â”€ Read functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function getPaymentWithCollections(
   paymentId: string
@@ -117,7 +118,7 @@ export async function getPaymentWithCollections(
     return null;
   }
 
-  // Direct-by-ID lookup: clinic_id scoping alone isn't enough for a doctor —
+  // Direct-by-ID lookup: clinic_id scoping alone isn't enough for a doctor â€”
   // verify this specific payment's doctor_id is actually them.
   // Admin/staff bypass this (see getPaymentVisibilityScope).
   const scope = getPaymentVisibilityScope(profile);
@@ -138,7 +139,7 @@ export async function getPaymentLineItems(
 
   await requireRole('doctor', 'staff');
 
-  // Line items don't carry doctor_id directly — verify via the parent
+  // Line items don't carry doctor_id directly â€” verify via the parent
   // payment first, same rule as getPaymentWithCollections above.
   const scope = getPaymentVisibilityScope(profile);
   if (scope.restricted) {
@@ -496,7 +497,7 @@ export async function getPaymentsDashboardData(): Promise<{
   };
 }
 
-// ── Line item mutations ───────────────────────────────────────────────────────
+// â”€â”€ Line item mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function addPaymentLineItem(
   input: z.infer<typeof AddLineItemSchema>
@@ -653,7 +654,7 @@ export async function removePaymentLineItem(
     if (newTotal < (payment.amount_paid || 0)) {
       return {
         success: false,
-        error: `Cannot remove this item — total would be less than amount already paid (Rs. ${payment.amount_paid.toFixed(2)})`,
+        error: `Cannot remove this item â€” total would be less than amount already paid (Rs. ${payment.amount_paid.toFixed(2)})`,
       };
     }
 
@@ -690,7 +691,7 @@ export async function removePaymentLineItem(
   }
 }
 
-// ── Charge creation ───────────────────────────────────────────────────────────
+// â”€â”€ Charge creation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function createManualCharge(
   input: z.infer<typeof CreateManualChargeSchema>
@@ -829,7 +830,7 @@ export async function createManualChargeAndApprove(
     }
 
     // Receipt generation + WhatsApp message moved to recordPaymentCollection
-    // (fires on first payment collected, not on approval) — see comment
+    // (fires on first payment collected, not on approval) â€” see comment
     // there. Approval alone no longer produces a receipt; a premature
     // receipt for an unpaid bill is not useful and the bill is still
     // freely editable at this point (Issue 5).
@@ -913,7 +914,7 @@ export async function setAmountAndApprovePayment(
     }
 
     // Receipt generation + WhatsApp message moved to recordPaymentCollection
-    // (fires on first payment collected, not on approval) — see comment
+    // (fires on first payment collected, not on approval) â€” see comment
     // there.
 
     revalidatePath('/dashboard/payments');
@@ -984,7 +985,7 @@ export async function approvePayment(
     }
 
     // Receipt generation + WhatsApp message moved to recordPaymentCollection
-    // (fires on first payment collected, not on approval) — see comment
+    // (fires on first payment collected, not on approval) â€” see comment
     // there.
 
     revalidatePath('/dashboard/payments');
@@ -1018,7 +1019,7 @@ export async function updatePaymentAmount(
     if (fetchError || !payment) return { success: false, error: 'Payment not found' };
 
     // Editable when pending (not yet approved) OR approved-but-unpaid
-    // (approved but payment_status still 'unpaid' — no payment_collections
+    // (approved but payment_status still 'unpaid' â€” no payment_collections
     // row exists yet). Locked the moment ANY money has been collected
     // (payment_status 'partial' or 'paid'), matching the immutability rule
     // confirmed for Issue 5: a receipt only exists once money has actually
@@ -1092,11 +1093,11 @@ export async function recordPaymentCollection(
     const doctorResult = resolveDoctorId(profile, v.doctor_id);
     if ('error' in doctorResult) return { success: false, error: doctorResult.error };
 
-    // Captured BEFORE the insert below — payment.amount_paid reflects the
+    // Captured BEFORE the insert below â€” payment.amount_paid reflects the
     // state prior to this collection. Used to detect "is this the FIRST
     // money ever collected on this payment" (Issue 5 design decision):
     // receipt generation and the WhatsApp receipt message now fire on
-    // first collection, not on approval — a premature receipt for a bill
+    // first collection, not on approval â€” a premature receipt for a bill
     // nobody has paid yet isn't useful, and the bill stays freely editable
     // until money actually changes hands.
     const isFirstCollection = (payment.amount_paid || 0) === 0;
@@ -1122,44 +1123,67 @@ export async function recordPaymentCollection(
       return { success: false, error: 'Failed to record collection' };
     }
 
+    // PERF FIX (cross-dashboard performance pass): this entire block used
+    // to run INLINE, awaited before the function returned -- and it does
+    // real work: PDF generation + storage upload
+    // (generateAndStorePaymentDocuments), then createReceiptMessage (which
+    // itself does ~8 sequential Supabase queries and ALSO calls
+    // generateAndStorePaymentDocuments a second time), then -- if
+    // auto-send is on -- an actual outbound network call to the WhatsApp
+    // provider via sendMessage. All of that was sitting directly in the
+    // "Record Payment" button's response path.
+    //
+    // record-payment-dialog-client.tsx only ever checks result.success /
+    // result.error and calls router.refresh() -- it never reads anything
+    // from this block's output -- so none of it needs to complete before
+    // the response returns. Deferred via after(), same pattern already
+    // established in features/patients/actions.ts (createPatient) and
+    // features/appointments/actions.ts (createAppointment,
+    // rescheduleAppointment). The payment collection itself is still
+    // recorded and confirmed synchronously above; only receipt generation
+    // and the WhatsApp send move to run after the response is sent.
     if (isFirstCollection) {
-      try {
-        await generateAndStorePaymentDocuments(v.payment_id);
-      } catch (docError) {
-        console.error('[recordPaymentCollection] Doc generation failed:', docError);
-      }
+      const paymentId = v.payment_id;
+      const clinicId = profile.clinic_id;
+      after(async () => {
+        try {
+          await generateAndStorePaymentDocuments(paymentId);
+        } catch (docError) {
+          console.error('[recordPaymentCollection] Doc generation failed:', docError);
+        }
 
-      // Queue WhatsApp receipt message — non-blocking. Auto-send (Item 2)
-      // mirrors dispenseAndBillEncounter's medicine-receipt pattern exactly:
-      // queue always happens; whether it's ALSO sent immediately is gated
-      // by clinics.auto_send_consultation_receipts, fail-open to true on
-      // any read error so a broken setting never silently reverts to
-      // manual-only. A failed auto-send is non-fatal — the collection and
-      // queued message both stay committed; the message just sits pending
-      // as the manual fallback.
-      try {
-        const messageResult = await createReceiptMessage({ paymentId: v.payment_id });
+        // Queue WhatsApp receipt message â€” non-blocking. Auto-send (Item 2)
+        // mirrors dispenseAndBillEncounter's medicine-receipt pattern exactly:
+        // queue always happens; whether it's ALSO sent immediately is gated
+        // by clinics.auto_send_consultation_receipts, fail-open to true on
+        // any read error so a broken setting never silently reverts to
+        // manual-only. A failed auto-send is non-fatal â€” the collection and
+        // queued message both stay committed; the message just sits pending
+        // as the manual fallback.
+        try {
+          const messageResult = await createReceiptMessage({ paymentId });
 
-        if (messageResult.success && messageResult.messageId) {
-          const { data: clinicSettings } = await supabase
-            .from('clinics')
-            .select('auto_send_consultation_receipts')
-            .eq('id', profile.clinic_id)
-            .single()
-            .returns<{ auto_send_consultation_receipts: boolean }>();
+          if (messageResult.success && messageResult.messageId) {
+            const { data: clinicSettings } = await supabase
+              .from('clinics')
+              .select('auto_send_consultation_receipts')
+              .eq('id', clinicId)
+              .single()
+              .returns<{ auto_send_consultation_receipts: boolean }>();
 
-          const autoSend = clinicSettings ? clinicSettings.auto_send_consultation_receipts : true;
+            const autoSend = clinicSettings ? clinicSettings.auto_send_consultation_receipts : true;
 
-          if (autoSend) {
-            const sendResult = await sendMessage({ messageId: messageResult.messageId });
-            if (!sendResult.success) {
-              console.error('[recordPaymentCollection] auto-send failed:', sendResult.error);
+            if (autoSend) {
+              const sendResult = await sendMessage({ messageId: messageResult.messageId });
+              if (!sendResult.success) {
+                console.error('[recordPaymentCollection] auto-send failed:', sendResult.error);
+              }
             }
           }
+        } catch (err) {
+          console.error('[recordPaymentCollection] Receipt message failed:', err);
         }
-      } catch (err) {
-        console.error('[recordPaymentCollection] Receipt message failed:', err);
-      }
+      });
     }
 
     revalidatePath('/dashboard/payments');
@@ -1282,7 +1306,7 @@ export async function getPaymentAlerts(filters?: {
   await requireRole('doctor', 'staff');
 
   // payment_alerts has no doctor_id column of its own (only payment_id,
-  // patient_id, appointment_id) — scoping has to go via the parent
+  // patient_id, appointment_id) â€” scoping has to go via the parent
   // payment's doctor_id, resolved as an id list first rather than a
   // direct .eq(), since there's no column to filter on directly.
   const scope = getPaymentVisibilityScope(profile);
@@ -1340,7 +1364,7 @@ export async function getPaymentAlerts(filters?: {
 // immediately after the first payment collection, or leave the message
 // queued for manual send. Mirrors setAutoSendMedicineReceipts /
 // getAutoSendMedicineReceiptsSetting in features/pharmacy/actions.ts exactly
-// — same is_clinic_admin gate (not role === 'doctor'), same fail-open
+// â€” same is_clinic_admin gate (not role === 'doctor'), same fail-open
 // default on read errors.
 // ============================================================================
 
