@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { currentUser } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from './server'
@@ -18,7 +19,15 @@ export type Profile = {
   pharmacy_access: boolean
 }
 
-export async function getOrCreateProfile(): Promise<Profile | null> {
+// Wrapped in React's cache() so that multiple calls to getOrCreateProfile()
+// within the SAME server request (e.g. once in AppLayout, then again inside
+// each of the 7 Promise.all'd staff-dashboard actions via requireRole) only
+// hit Supabase once. The cache is request-scoped and automatically reset
+// between requests -- this introduces no staleness risk, it only removes
+// duplicate round trips within a single render. See Chat "cross-dashboard
+// performance pass" for the diagnosis: getOrCreateProfile was firing ~8x
+// per doctor/staff dashboard load, all for identical data.
+export const getOrCreateProfile = cache(async (): Promise<Profile | null> => {
   let user
   try {
     user = await currentUser()
@@ -36,14 +45,14 @@ export async function getOrCreateProfile(): Promise<Profile | null> {
     .maybeSingle()
 
   return existing as Profile | null
-}
+})
 
-// Clinic detail fields are all optional — matches the optionality of the
+// Clinic detail fields are all optional â€” matches the optionality of the
 // same fields on clinic-settings-form.tsx, so a new admin can skip them at
 // signup and fill them in later via Settings. tosVersion is required: the
 // server action always supplies it from legal-content.ts, and the RPC
 // itself refuses to create a clinic without it (defense-in-depth).
-// Clinic detail fields are all optional — matches the optionality of the
+// Clinic detail fields are all optional â€” matches the optionality of the
 // same fields on clinic-settings-form.tsx, so a new admin can skip them at
 // signup and fill them in later via Settings. fullNameOverride follows the
 // same pattern as acceptStaffInvitation below: Clerk doesn't always supply
