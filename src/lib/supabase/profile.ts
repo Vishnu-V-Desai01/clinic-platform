@@ -35,7 +35,7 @@ export const getOrCreateProfile = cache(async (): Promise<Profile | null> => {
     return null
   }
   if (!user) return null
-
+console.log('[getOrCreateProfile] executing query for', user.id)
   const supabase = createServerSupabaseClient()
 
   const { data: existing } = await supabase

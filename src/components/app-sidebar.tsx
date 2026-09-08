@@ -42,14 +42,14 @@ export function AppSidebar({
   const pathname = usePathname()
   const router = useRouter()
 
-  // Closes the mobile sidebar sheet AFTER navigation actually completes —
+  // Closes the mobile sidebar sheet AFTER navigation actually completes â€”
   // tied to pathname changing (which only happens once the new route has
   // mounted), not to the click itself. Closing on click fired too early:
   // the sidebar would slide away while the new page was still loading in
   // behind it, which looked like the sidebar closing onto a blank screen.
   // This way the new page is already visible when the sidebar starts
   // sliding shut. Covers both plain nav-link clicks and the mode-switch
-  // button below — anything that changes pathname triggers this, so
+  // button below â€” anything that changes pathname triggers this, so
   // neither needs its own manual close call.
   const { isMobile, setOpenMobile } = useSidebar()
   useEffect(() => {
@@ -58,7 +58,7 @@ export function AppSidebar({
   }, [pathname])
 
   // Settings lives at /dashboard/settings (shared URL) but belongs
-  // to the admin context — keep admin nav active when navigating there.
+  // to the admin context â€” keep admin nav active when navigating there.
   const isAdminMode =
     profile.is_clinic_admin &&
     (pathname.startsWith('/dashboard/admin') ||
@@ -68,11 +68,11 @@ export function AppSidebar({
   const baseNavItems = isAdminMode ? adminModeNav : navByRole[profile.role]
 
   // Visibility now depends ONLY on the clinic's module flag, not on this
-  // person's individual pharmacy_access — a doctor/staff member without
+  // person's individual pharmacy_access â€” a doctor/staff member without
   // granted access still sees "Pharmacy" in the sidebar, clicks it, and the
   // page itself shows "Pharmacy inventory access not provided." Admin mode
   // stays excluded, same as Payments/Appointments are absent from
-  // adminModeNav — it's a deliberately separate, settings-only context.
+  // adminModeNav â€” it's a deliberately separate, settings-only context.
   const canSeePharmacyNav = !isAdminMode && pharmacyEnabled
 
   const navItems = canSeePharmacyNav ? insertBeforeMessages(baseNavItems, pharmacyNavItem) : baseNavItems
@@ -105,7 +105,17 @@ export function AppSidebar({
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.href}>
+                      {/* prefetch={false}: with ~9 nav links all in viewport
+                          at once, Next's default viewport prefetch was firing
+                          every linked route's server component (including its
+                          own requireRole() + data queries) in the background
+                          on every dashboard load. Confirmed via Vercel
+                          Observability: 38 Supabase calls per /dashboard/overview
+                          load vs. the ~10 the visited page actually needs.
+                          Trade-off: sidebar clicks now fetch on click instead
+                          of feeling instant, but initial load stops paying for
+                          8 pages' worth of speculative work it never uses. */}
+                      <Link href={item.href} prefetch={false}>
                         <item.icon />
                         <span>{item.title}</span>
                       </Link>
