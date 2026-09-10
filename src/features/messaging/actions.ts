@@ -111,7 +111,7 @@ function additionalConsentDeniedError(purpose: ConsentPurpose): string {
   return `This patient has not consented to ${purpose.replace(/_/g, " ")}.`;
 }
 
-// ── Message visibility scoping (Issue 3, re-scoped) ────────────────
+// ── Message visibility scoping (Issue 3, re-scoped) ─────────────────────
 //
 // Visibility now mirrors WHICH doctor the message's underlying record
 // actually belongs to, not the patient's primary assignment — matching
@@ -454,13 +454,20 @@ export async function createAppointmentMessage(input: CreateAppointmentMessageIn
     hour12: true,
   });
 
+  // Item 1/2 (Sept 2026): DASHBOARD_LINK removed. The approved template
+  // copy no longer links to the dead /patient/dashboard/messages page —
+  // it now ends on CLINIC_PHONE instead. This object must stay in sync
+  // with appointmentPlaceholdersSchema (schema.ts) and the
+  // message_templates.content rows for all 5 languages (see migration
+  // 20260910120000_appointment_template_6slot.sql) — all three define
+  // the same 6-slot shape from three different angles, and a mismatch
+  // between them is exactly what caused the prior send failures.
   const placeholders: AppointmentPlaceholders = {
     PATIENT_NAME: `${patient.first_name} ${patient.last_name}`,
     DOCTOR_NAME: doctorProfile?.full_name ?? "your doctor",
     CLINIC_NAME: clinic.name,
     APPOINTMENT_DATE: formattedDate,
     APPOINTMENT_TIME: formattedTime,
-    DASHBOARD_LINK: `${process.env.NEXT_PUBLIC_APP_URL}/patient/dashboard/messages`,
     CLINIC_PHONE: clinic.phone ?? "the clinic",
   };
 

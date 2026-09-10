@@ -109,13 +109,18 @@ export const registrationPlaceholdersSchema = z.object({
   LOGIN_LINK: z.string(),
 });
 
+// Item 1/2 (Sept 2026): DASHBOARD_LINK removed — the approved template copy
+// no longer links to the dead /patient/dashboard/messages page. The
+// template now ends on a phone number instead (CLINIC_PHONE). This schema
+// change, the object literal in createAppointmentMessage, and the
+// message_templates.content rows for all 5 languages must all move
+// together — see the migration accompanying this change.
 export const appointmentPlaceholdersSchema = z.object({
   PATIENT_NAME: z.string(),
   DOCTOR_NAME: z.string(),
   CLINIC_NAME: z.string(),
   APPOINTMENT_DATE: z.string(),
   APPOINTMENT_TIME: z.string(),
-  DASHBOARD_LINK: z.string(),
   CLINIC_PHONE: z.string(),
 });
 
