@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/supabase/profile";
+import { createAppointmentMessage } from "@/features/messaging/actions";
 import type {
   PendingRequestItem,
   TodayAppointmentItem,
@@ -296,8 +297,39 @@ export async function listRecentMedicineSales() {
 }
 
 // ---------------------------------------------------------------------------
-// Confirm a pending request: create the real appointment, then close out
-// the request. Staff and doctors both do this directly — no cross-approval.
+// Confirm a pending request: create the real appointment, close out the
+// request, then queue the patient's confirmation message. Staff and
+// doctors both do this directly — no cross-approval.
+//
+// ITEM 2 PARITY FIX: previously this function created the appointment and
+// stopped — no confirmation message was ever queued, unlike the clinic-side
+// booking path (bookAppointment in features/appointments/actions.ts), which
+// calls createAppointmentMessage() immediately after inserting the
+// appointment row. That gap is what the call at the end of this function
+// closes.
+//
+// We reuse createAppointmentMessage() itself rather than duplicating its
+// logic — it already re-derives clinic/doctor/patient from the appointment
+// row (so it's unaffected by this portal user's clinic_id being NULL),
+// already gates on whatsapp_notifications + appointment_reminders consent,
+// and already refuses to queue a second pending message for the same
+// appointment_id.
+//
+// ORDERING (deliberate): the message is queued AFTER the request row is
+// successfully marked 'confirmed', not before. If the request-status
+// update fails, this function throws before ever reaching the message
+// call — so a patient is never notified about an appointment whose
+// request is not itself confirmed yet. The tradeoff: if the message call
+// itself fails or throws, the appointment and the confirmed request both
+// already exist with no confirmation queued. That failure is caught and
+// logged (not swallowed silently) so it's visible in Vercel logs; a
+// missed notification for a real, confirmed appointment is a lesser
+// problem than notifying for one that turned out not to confirm.
+//
+// A {success:false} result from createAppointmentMessage (most commonly:
+// consent revoked) is the CORRECT outcome, not a bug — it must not throw
+// or roll back the confirm action, since the appointment and request are
+// already committed by this point.
 // ---------------------------------------------------------------------------
 
 export async function confirmAppointmentRequest(
@@ -397,10 +429,26 @@ export async function confirmAppointmentRequest(
 
   if (updateError) {
     // The appointment was already created — surface this clearly rather
-    // than silently leaving the request stuck at "pending".
+    // than silently leaving the request stuck at "pending". Deliberately
+    // thrown BEFORE the message-queue call below: an unconfirmed request
+    // must never trigger a "your appointment is confirmed" message.
     throw new Error(
       `Appointment was created, but the request could not be marked confirmed: ${updateError.message}. Please refresh and check manually.`
     );
+  }
+
+  // Item 2 parity fix — see comment block above this function. Runs only
+  // after the request is durably marked 'confirmed' above.
+  try {
+    const messageResult = await createAppointmentMessage({ appointmentId: newAppointment.id });
+    if (!messageResult.success) {
+      console.error(
+        "[confirmAppointmentRequest] Failed to queue confirmation message:",
+        messageResult.error
+      );
+    }
+  } catch (err) {
+    console.error("[confirmAppointmentRequest] Unexpected error queueing confirmation message:", err);
   }
 
   revalidatePath("/dashboard/overview");
