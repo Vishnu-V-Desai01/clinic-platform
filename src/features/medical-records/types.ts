@@ -101,6 +101,25 @@ export interface TestResult {
 }
 
 // ---------------------------------------------------------------
+// TREATMENT (Phase 1)
+// Treatment name is doctor-typed free text or filled from a
+// clinical-note snippet's title; notes likewise from free text
+// or a snippet's body. The snippet reference itself is never
+// stored — text is copied at save time, so deleting a snippet
+// later cannot alter a past encounter's recorded treatments.
+// ---------------------------------------------------------------
+export interface Treatment {
+  id:             string
+  clinic_id:      string
+  encounter_id:   string
+  patient_id:     string
+  treatment_name: string
+  notes:          string | null
+  created_at:     string
+  updated_at:     string
+}
+
+// ---------------------------------------------------------------
 // ENCOUNTER WITH ALL CHILDREN
 // Used for the encounter detail / edit view
 // ---------------------------------------------------------------
@@ -109,6 +128,7 @@ export interface EncounterWithDetails extends Encounter {
   observations:  Observation[]
   prescriptions: Prescription[]
   test_results:  TestResult[]
+  treatments:    Treatment[]
 }
 
 // ---------------------------------------------------------------

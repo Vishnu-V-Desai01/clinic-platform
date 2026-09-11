@@ -45,6 +45,16 @@ export const testResultItemSchema = z.object({
   notes:           z.string().max(1000).trim().optional().nullable(),
 })
 
+// Phase 1: Treatment Details. Field names match the confirmed mapping —
+// treatment_name (required, from a snippet's title or free text) + notes
+// (optional, from a snippet's body or free text) — matching the `notes`
+// naming already used on diagnoses/observations rather than introducing
+// a one-off field name.
+export const treatmentItemSchema = z.object({
+  treatment_name: z.string().min(1, 'Treatment name is required').max(255).trim(),
+  notes:          z.string().max(2000).trim().optional().nullable(),
+})
+
 // ---------------------------------------------------------------
 // NEW ENCOUNTER FORM SCHEMA
 // One submission creates the encounter row + all children atomically
@@ -58,6 +68,7 @@ export const newEncounterSchema = z.object({
   diagnoses:       z.array(diagnosisItemSchema).default([]),
   observations:    z.array(observationItemSchema).default([]),
   prescriptions:   z.array(prescriptionItemSchema).default([]),
+  treatments:      z.array(treatmentItemSchema).default([]),
 })
 
 // ---------------------------------------------------------------
@@ -68,6 +79,7 @@ export const addDiagnosisSchema    = diagnosisItemSchema
 export const addObservationSchema  = observationItemSchema
 export const addPrescriptionSchema = prescriptionItemSchema
 export const addTestResultSchema   = testResultItemSchema
+export const addTreatmentSchema    = treatmentItemSchema
 
 // ---------------------------------------------------------------
 // STATUS UPDATE SCHEMAS
@@ -102,6 +114,7 @@ export type DiagnosisItemData           = z.infer<typeof diagnosisItemSchema>
 export type ObservationItemData         = z.infer<typeof observationItemSchema>
 export type PrescriptionItemData        = z.infer<typeof prescriptionItemSchema>
 export type TestResultItemData          = z.infer<typeof testResultItemSchema>
+export type TreatmentItemData           = z.infer<typeof treatmentItemSchema>
 export type UpdateEncounterStatusData   = z.infer<typeof updateEncounterStatusSchema>
 export type UpdateDiagnosisStatusData   = z.infer<typeof updateDiagnosisStatusSchema>
 export type UpdatePrescriptionStatusData = z.infer<typeof updatePrescriptionStatusSchema>

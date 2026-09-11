@@ -9,6 +9,7 @@ import {
   FlaskConical,
   Pill,
   Stethoscope,
+  Syringe,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -385,6 +386,32 @@ export default function EncounterDetailClient({
                         status={rx.status}
                         label={PRESCRIPTION_STATUS_LABELS[rx.status]}
                       />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border shadow-sm lg:col-span-2">
+          <SectionHeader icon={Syringe} title="Treatments" />
+          <CardContent>
+            {encounter.treatments.length === 0 ? (
+              <p className="text-sm italic text-muted-foreground">
+                No treatments recorded.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {encounter.treatments.map((tx) => (
+                  <li key={tx.id} className="py-3 first:pt-0 last:pb-0">
+                    <p className="text-sm font-medium text-foreground">
+                      {tx.treatment_name}
+                    </p>
+                    {tx.notes && (
+                      <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">
+                        {tx.notes}
+                      </p>
                     )}
                   </li>
                 ))}

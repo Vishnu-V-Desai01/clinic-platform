@@ -63,6 +63,9 @@ export async function getEncountersForPatient(
 // "this encounter has none" - the encounter and any children that DID
 // load are still returned, since failing the whole request over one
 // flaky child query would lose strictly more information than it saves.
+//
+// Phase 1: treatments added as a fifth child query, same Promise.all
+// batch, same warning-on-failure handling as its siblings.
 // ---------------------------------------------------------------
 export async function getEncounterWithDetails(
   encounterId: string
@@ -74,13 +77,14 @@ export async function getEncounterWithDetails(
 
     const supabase = await createServerSupabaseClient()
 
-    const [encounterRes, diagnosesRes, observationsRes, prescriptionsRes, testResultsRes] =
+    const [encounterRes, diagnosesRes, observationsRes, prescriptionsRes, testResultsRes, treatmentsRes] =
       await Promise.all([
         supabase.from('encounters').select('*').eq('id', encounterId).single(),
         supabase.from('diagnoses').select('*').eq('encounter_id', encounterId).order('created_at'),
         supabase.from('observations').select('*').eq('encounter_id', encounterId).order('created_at'),
         supabase.from('prescriptions').select('*').eq('encounter_id', encounterId).order('created_at'),
         supabase.from('test_results').select('*').eq('encounter_id', encounterId).order('created_at'),
+        supabase.from('encounter_treatments').select('*').eq('encounter_id', encounterId).order('created_at'),
       ])
 
     if (encounterRes.error) return { error: encounterRes.error.message }
@@ -103,6 +107,10 @@ export async function getEncounterWithDetails(
       console.error('Test results fetch error:', testResultsRes.error.message)
       warnings.push('Some test results could not be loaded.')
     }
+    if (treatmentsRes.error) {
+      console.error('Treatments fetch error:', treatmentsRes.error.message)
+      warnings.push('Some treatment details could not be loaded.')
+    }
 
     const data: EncounterWithDetails = {
       ...encounterRes.data,
@@ -110,6 +118,7 @@ export async function getEncounterWithDetails(
       observations:  observationsRes.data  ?? [],
       prescriptions: prescriptionsRes.data ?? [],
       test_results:  testResultsRes.data   ?? [],
+      treatments:    treatmentsRes.data    ?? [],
     }
 
     return warnings.length > 0 ? { data, warnings } : { data }
@@ -129,6 +138,10 @@ export async function getEncounterWithDetails(
 // the existing console.error. Previously the caller had no way to
 // know anything was dropped - success:true looked identical whether
 // everything saved or some batches silently failed.
+//
+// Phase 1: treatments added as a fifth bulk-insert step, same
+// pattern as diagnoses/observations/prescriptions (log + warning on
+// failure, never fails the whole encounter save).
 // ---------------------------------------------------------------
 export async function createEncounter(
   patientId: string,
@@ -145,7 +158,7 @@ export async function createEncounter(
     const parsed = newEncounterSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-    const { encounter_date, chief_complaint, notes, diagnoses, observations, prescriptions } =
+    const { encounter_date, chief_complaint, notes, diagnoses, observations, prescriptions, treatments } =
       parsed.data
 
     const supabase = await createServerSupabaseClient()
@@ -231,6 +244,23 @@ export async function createEncounter(
       if (error) {
         console.error('Prescriptions insert error:', error.message)
         warnings.push('Some prescriptions could not be saved.')
+      }
+    }
+
+    // 5. Bulk-insert treatments (Phase 1)
+    if (treatments.length > 0) {
+      const { error } = await supabase.from('encounter_treatments').insert(
+        treatments.map((t) => ({
+          clinic_id:      profile.clinic_id,
+          encounter_id:   encounterId,
+          patient_id:     patientId,
+          treatment_name: t.treatment_name,
+          notes:          t.notes ?? null,
+        }))
+      )
+      if (error) {
+        console.error('Treatments insert error:', error.message)
+        warnings.push('Some treatment details could not be saved.')
       }
     }
 

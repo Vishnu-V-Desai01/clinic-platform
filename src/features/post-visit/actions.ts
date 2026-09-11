@@ -62,6 +62,13 @@
 // real clinic's note volume. Entirely server-side, no external service —
 // satisfies the "internal clinician tooling, no PII leaving the system"
 // guardrail by construction.
+//
+// Phase 1 (Treatment Details) addition: getVisitPrefill now fetches this
+// encounter's encounter_treatments rows alongside diagnoses/observations
+// in edit mode, and completeVisit diffs data.encounter.treatments against
+// existing rows using the exact same create/update/delete-by-id pattern
+// already used for diagnoses and observations below — no new pattern
+// introduced, just the third instance of the existing one.
 
 'use server'
 
@@ -81,6 +88,7 @@ import type {
   PrescriptionLine,
   DiagnosisLine,
   ObservationLine,
+  TreatmentLine,
   MedicineReminderTime,
   ChargeLineItem,
   EncounterData,
@@ -506,10 +514,10 @@ export async function getVisitPrefill(
       }
     }
 
-    // ── Encounter data (diagnoses/observations) — edit mode only ──────────
+    // ── Encounter data (diagnoses/observations/treatments) — edit mode only ──
     let encounterData: EncounterData | undefined
     if (isEditMode) {
-      const [diagnosesRes, observationsRes] = await Promise.all([
+      const [diagnosesRes, observationsRes, treatmentsRes] = await Promise.all([
         supabase
           .from('diagnoses')
           .select('*')
@@ -518,6 +526,12 @@ export async function getVisitPrefill(
           .order('created_at', { ascending: true }),
         supabase
           .from('observations')
+          .select('*')
+          .eq('encounter_id', existingEncounter!.id)
+          .eq('clinic_id', clinicId)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('encounter_treatments')
           .select('*')
           .eq('encounter_id', existingEncounter!.id)
           .eq('clinic_id', clinicId)
@@ -544,11 +558,20 @@ export async function getVisitPrefill(
         isDeleted:       false,
       }))
 
+      const treatments: TreatmentLine[] = (treatmentsRes.data ?? []).map((t: any) => ({
+        localId:       crypto.randomUUID(),
+        treatmentId:   t.id,
+        treatmentName: t.treatment_name,
+        notes:         t.notes ?? undefined,
+        isDeleted:     false,
+      }))
+
       encounterData = {
         chiefComplaint: existingEncounter!.chief_complaint ?? undefined,
         notes:          existingEncounter!.notes ?? undefined,
         diagnoses,
         observations,
+        treatments,
       }
     }
 
@@ -866,9 +889,9 @@ export async function completeVisit(
     //
     // EDIT mode (existing encounter found): UPDATE the encounter row
     // (chief_complaint/notes/last_edited_by/last_edited_at) instead of
-    // inserting a new one, and diff diagnoses/observations/prescriptions
-    // against what's already saved — create/update/delete per line, same
-    // pattern Step A already uses for care_plan_medicines.
+    // inserting a new one, and diff diagnoses/observations/treatments/
+    // prescriptions against what's already saved — create/update/delete
+    // per line, same pattern Step A already uses for care_plan_medicines.
     // ════════════════════════════════════════════════════════════════════════
     if (data.encounter !== null) {
       const enc = data.encounter
@@ -1025,6 +1048,57 @@ export async function completeVisit(
         if (error) {
           console.error('[completeVisit] observations', error)
           warnings.push('Some vitals / observations could not be saved.')
+        }
+      }
+
+      // ── Treatments (Phase 1): diff (edit mode) or plain insert (create
+      // mode) — identical pattern to diagnoses/observations above, keyed
+      // by treatmentId. ─────────────────────────────────────────────────
+      const deletedTx = enc.treatments.filter((t) => t.isDeleted && t.treatmentId)
+      const updatedTx = enc.treatments.filter((t) => !t.isDeleted && t.treatmentId)
+      const createdTx = enc.treatments.filter((t) => !t.isDeleted && !t.treatmentId)
+
+      for (const tx of deletedTx) {
+        const { error } = await supabase
+          .from('encounter_treatments')
+          .delete()
+          .eq('id', tx.treatmentId!)
+          .eq('clinic_id', clinicId)
+        if (error) {
+          console.error('[completeVisit] deleteTreatment', error)
+          warnings.push(`Could not remove treatment "${tx.treatmentName}".`)
+        }
+      }
+
+      for (const tx of updatedTx) {
+        const { error } = await supabase
+          .from('encounter_treatments')
+          .update({
+            treatment_name: tx.treatmentName,
+            notes:          tx.notes ?? null,
+            updated_at:     new Date().toISOString(),
+          })
+          .eq('id', tx.treatmentId!)
+          .eq('clinic_id', clinicId)
+        if (error) {
+          console.error('[completeVisit] updateTreatment', error)
+          warnings.push(`Could not update treatment "${tx.treatmentName}".`)
+        }
+      }
+
+      if (createdTx.length > 0) {
+        const { error } = await supabase.from('encounter_treatments').insert(
+          createdTx.map((t) => ({
+            clinic_id:      clinicId,
+            encounter_id:   encounterId,
+            patient_id:     patientId,
+            treatment_name: t.treatmentName,
+            notes:          t.notes ?? null,
+          })),
+        )
+        if (error) {
+          console.error('[completeVisit] treatments', error)
+          warnings.push('Some treatment details could not be saved.')
         }
       }
 

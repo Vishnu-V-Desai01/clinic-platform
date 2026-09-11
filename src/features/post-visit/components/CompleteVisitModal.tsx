@@ -14,6 +14,12 @@
 //   - Header shows "Editing a completed visit" when encounterId is present
 //     (re-edit) vs the original "Complete Visit" title (first-time).
 //   - ChargesCard/ReviewCard receive the locked/requiresApproval flags.
+//
+// Phase 1 (Treatment Details) addition: both places that build an
+// EncounterData/CompleteVisitPayload.encounter object literal now also
+// carry `treatments` — the blank-state default in makeInitialState, and
+// the outgoing payload in buildPayload — same pattern as diagnoses/
+// observations right next to each.
 
 'use client'
 
@@ -84,6 +90,7 @@ function makeInitialState(
       notes:          undefined,
       diagnoses:      [],
       observations:   [],
+      treatments:     [],
     },
     // Issue 5 (edit mode): if this visit already has charges saved, start
     // from those (whether editable or locked — display either way).
@@ -160,6 +167,12 @@ function buildPayload(state: WizardState, meta: VisitMeta): CompleteVisitPayload
             unit:            o.unit,
             notes:           o.notes,
             isDeleted:       o.isDeleted,
+          })),
+          treatments: state.encounter.treatments.map((t) => ({
+            treatmentId:   t.treatmentId,
+            treatmentName: t.treatmentName,
+            notes:         t.notes,
+            isDeleted:     t.isDeleted,
           })),
         },
 

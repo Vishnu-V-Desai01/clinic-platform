@@ -106,11 +106,25 @@ export type ObservationLine = {
   isDeleted:       boolean
 }
 
+// Phase 1: Treatment Details wizard line. Same shape/rules as
+// DiagnosisLine/ObservationLine — treatmentId set only when loaded from an
+// existing encounter_treatments row; isDeleted only meaningful once
+// treatmentId is set (a brand-new, never-saved line is just dropped
+// client-side instead).
+export type TreatmentLine = {
+  localId:        string
+  treatmentId?:   string
+  treatmentName:  string
+  notes?:         string
+  isDeleted:      boolean
+}
+
 export type EncounterData = {
   chiefComplaint?: string
   notes?:          string
   diagnoses:       DiagnosisLine[]
   observations:    ObservationLine[]
+  treatments:      TreatmentLine[]
 }
 
 export type ChargeLineItem = {
@@ -219,6 +233,12 @@ export type CompleteVisitPayload = {
       unit?:           string
       notes?:          string
       isDeleted:       boolean
+    }>
+    treatments: Array<{
+      treatmentId?:   string
+      treatmentName:  string
+      notes?:         string
+      isDeleted:      boolean
     }>
   } | null
   charges: Array<{

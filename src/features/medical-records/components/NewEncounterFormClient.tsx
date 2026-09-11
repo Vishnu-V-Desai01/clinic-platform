@@ -30,6 +30,7 @@ import { createEncounter } from "../actions"
 import AddDiagnosisDialog,    { type DiagnosisFormItem    } from "./AddDiagnosisDialog"
 import AddObservationDialog,  { type ObservationFormItem  } from "./AddObservationDialog"
 import AddPrescriptionDialog, { type PrescriptionFormItem } from "./AddPrescriptionDialog"
+import AddTreatmentDialog,    { type TreatmentFormItem    } from "./AddTreatmentDialog"
 
 function obsTypeLabel(type: string): string {
   const found = COMMON_OBSERVATION_TYPES.find((t) => t.value === type)
@@ -60,10 +61,12 @@ export default function NewEncounterFormClient({
   const [diagnoses,     setDiagnoses]     = useState<DiagnosisFormItem[]>([])
   const [observations,  setObservations]  = useState<ObservationFormItem[]>([])
   const [prescriptions, setPrescriptions] = useState<PrescriptionFormItem[]>([])
+  const [treatments,    setTreatments]    = useState<TreatmentFormItem[]>([])
 
   const [dxOpen,  setDxOpen]  = useState(false)
   const [obsOpen, setObsOpen] = useState(false)
   const [rxOpen,  setRxOpen]  = useState(false)
+  const [txOpen,  setTxOpen]  = useState(false)
 
   function handleSubmit() {
     setFormError(null)
@@ -95,6 +98,10 @@ export default function NewEncounterFormClient({
           duration:      p.duration || null,
           instructions:  p.instructions || null,
           status:        p.status as PrescriptionStatus,
+        })),
+        treatments: treatments.map((t) => ({
+          treatment_name: t.treatment_name,
+          notes:          t.notes || null,
         })),
       })
 
@@ -180,7 +187,7 @@ export default function NewEncounterFormClient({
               </Accordion>
             </Card>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
 
               {/* Diagnoses */}
               <Card>
@@ -373,6 +380,62 @@ export default function NewEncounterFormClient({
                 </CardContent>
               </Card>
 
+              {/* Treatments (Phase 2) */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-medium">
+                      Treatments
+                    </CardTitle>
+                    {treatments.length > 0 && (
+                      <Badge variant="secondary">{treatments.length}</Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => setTxOpen(true)}
+                  >
+                    <Plus className="mr-2 size-4" />
+                    Add Treatment
+                  </Button>
+
+                  {treatments.map((tx, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium leading-snug text-foreground">
+                          {tx.treatment_name}
+                        </p>
+                        {tx.notes && (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {tx.notes}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() =>
+                          setTreatments((rows) => rows.filter((_, j) => j !== i))
+                        }
+                        aria-label={`Remove treatment ${i + 1}`}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
             </div>
           </div>
         </div>
@@ -400,6 +463,14 @@ export default function NewEncounterFormClient({
         onAdd={(item) => {
           setPrescriptions((prev) => [...prev, item])
           setRxOpen(false)
+        }}
+      />
+      <AddTreatmentDialog
+        open={txOpen}
+        onClose={() => setTxOpen(false)}
+        onAdd={(item) => {
+          setTreatments((prev) => [...prev, item])
+          setTxOpen(false)
         }}
       />
 

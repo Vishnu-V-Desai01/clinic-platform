@@ -56,6 +56,17 @@ export const observationLineSchema = z.object({
   isDeleted:       z.boolean().default(false),
 })
 
+// Phase 1: Treatment Details, wizard diff shape — mirrors diagnosisLineSchema
+// (id-if-editing + isDeleted for the create/update/delete diff completeVisit
+// already applies to diagnoses/observations). treatmentName is required;
+// notes is optional, matching the field's nullability on the table.
+export const treatmentLineSchema = z.object({
+  treatmentId:   z.string().uuid().optional(),
+  treatmentName: z.string().min(1, 'Treatment name is required').trim(),
+  notes:         z.string().trim().optional(),
+  isDeleted:     z.boolean().default(false),
+})
+
 // ─── Encounter ─────────────────────────────────────────────────────────────────
 
 export const encounterDataSchema = z.object({
@@ -63,6 +74,7 @@ export const encounterDataSchema = z.object({
   notes:          z.string().trim().optional(),
   diagnoses:      z.array(diagnosisLineSchema).default([]),
   observations:   z.array(observationLineSchema).default([]),
+  treatments:     z.array(treatmentLineSchema).default([]),
 })
 
 // ─── Charge line items ─────────────────────────────────────────────────────────

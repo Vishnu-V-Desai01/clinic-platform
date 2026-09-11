@@ -11,6 +11,10 @@
 // a "Locked" badge instead of an Edit button (nothing to edit), and a
 // staff-proposed charge shows a "Needs approval" badge alongside its
 // summary rather than looking identical to an auto-approved one.
+//
+// Phase 2 (Treatment Details): encSummary now also counts treatments,
+// same pattern as diagnoses/observations, so the review step doesn't
+// silently omit them from what the doctor sees before confirming.
 
 'use client'
 
@@ -62,10 +66,12 @@ function reminderSummary(times: MedicineReminderTime[]): string {
 function encSummary(enc: EncounterData): string {
   const activeDiagnoses    = enc.diagnoses.filter((d) => !d.isDeleted)
   const activeObservations = enc.observations.filter((o) => !o.isDeleted)
+  const activeTreatments   = enc.treatments.filter((t) => !t.isDeleted)
   const parts: string[] = []
   if (enc.chiefComplaint)          parts.push(enc.chiefComplaint)
   if (activeDiagnoses.length)      parts.push(`${activeDiagnoses.length} diagnosis${activeDiagnoses.length > 1 ? 'es' : ''}`)
   if (activeObservations.length)   parts.push(`${activeObservations.length} vital${activeObservations.length > 1 ? 's' : ''}`)
+  if (activeTreatments.length)     parts.push(`${activeTreatments.length} treatment${activeTreatments.length > 1 ? 's' : ''}`)
   return parts.length > 0 ? parts.join(' · ') : 'No clinical notes'
 }
 

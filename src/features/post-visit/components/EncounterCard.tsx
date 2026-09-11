@@ -33,6 +33,17 @@
 // only that typed line-prefix with the suggestion text — never touches
 // anything before it or after the cursor on the same line. Assists only;
 // the doctor can always keep typing freely and ignore every suggestion.
+//
+// Phase 2 (Treatment Details) addition: a Treatments section, same
+// isDeleted/soft-delete pattern as Diagnoses/Observations directly above
+// it. Its Treatment field uses the shared TreatmentNameCombobox
+// (features/clinical-snippets) — a DIFFERENT snippet interaction than the
+// "Insert snippet…" dropdown above: that one inserts at cursor into a
+// notes textarea non-destructively; this one is a discrete pick that
+// fills BOTH the name and notes fields directly, per the confirmed
+// mapping (title → treatment, body → notes). Both read from the same
+// doctor-scoped snippet store, just used two different ways for two
+// different purposes.
 
 'use client'
 
@@ -52,11 +63,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { listSnippetsForInsert } from '@/features/clinical-snippets/actions'
 import type { ClinicalNoteSnippet } from '@/features/clinical-snippets/types'
+import TreatmentNameCombobox from '@/features/clinical-snippets/components/TreatmentNameCombobox'
 import { searchPastNoteLines } from '../actions'
 import type {
   EncounterData,
   DiagnosisLine,
   ObservationLine,
+  TreatmentLine,
   DiagnosisSeverity,
   DiagnosisStatus,
 } from '../types'
@@ -79,7 +92,7 @@ const OBSERVATION_TYPES = [
 ]
 
 // Patch top-level encounter fields without touching children
-type EncounterPatch = Partial<Pick<EncounterData, 'chiefComplaint' | 'notes' | 'diagnoses' | 'observations'>>
+type EncounterPatch = Partial<Pick<EncounterData, 'chiefComplaint' | 'notes' | 'diagnoses' | 'observations' | 'treatments'>>
 
 const EMPTY_DIAG_FORM = {
   conditionName: '',
@@ -95,14 +108,21 @@ const EMPTY_OBS_FORM = {
   unit:            '',
 }
 
+const EMPTY_TX_FORM = {
+  treatmentName: '',
+  notes:         '',
+}
+
 const NOTE_LINE_SEARCH_DEBOUNCE_MS = 250
 const NOTE_LINE_MIN_LENGTH = 3
 
 export default function EncounterCard({ value, onChange }: EncounterCardProps) {
   const [showDiagForm, setShowDiagForm] = useState(false)
   const [showObsForm,  setShowObsForm]  = useState(false)
+  const [showTxForm,   setShowTxForm]   = useState(false)
   const [diagForm, setDiagForm]         = useState(EMPTY_DIAG_FORM)
   const [obsForm,  setObsForm]          = useState(EMPTY_OBS_FORM)
+  const [txForm,   setTxForm]           = useState(EMPTY_TX_FORM)
 
   // Item 7a: snippets for the insert dropdown, fetched once on mount.
   const [snippets, setSnippets]       = useState<ClinicalNoteSnippet[]>([])
@@ -136,6 +156,7 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
   // Visible (not soft-deleted) lines, for rendering only.
   const visibleDiagnoses    = value.diagnoses.filter((d) => !d.isDeleted)
   const visibleObservations = value.observations.filter((o) => !o.isDeleted)
+  const visibleTreatments   = value.treatments.filter((t) => !t.isDeleted)
 
   // ── Snippet insert (Item 7a) ─────────────────────────────────────────
   // Inserts at the textarea's current cursor position, never overwriting
@@ -297,6 +318,42 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
       })
     } else {
       patch({ observations: value.observations.filter((o) => o.localId !== localId) })
+    }
+  }
+
+  // ── Treatment handlers (Phase 2) ────────────────────────────────────────
+  // Same soft-delete-if-saved / drop-if-new pattern as diagnoses/
+  // observations above.
+
+  const handleTreatmentSnippetSelect = (snippet: ClinicalNoteSnippet) => {
+    setTxForm({ treatmentName: snippet.title, notes: snippet.body })
+  }
+
+  const handleAddTreatment = () => {
+    if (!txForm.treatmentName.trim()) return
+    const newTx: TreatmentLine = {
+      localId:       crypto.randomUUID(),
+      treatmentName: txForm.treatmentName.trim(),
+      notes:         txForm.notes.trim() || undefined,
+      isDeleted:     false,
+    }
+    patch({ treatments: [...value.treatments, newTx] })
+    setTxForm(EMPTY_TX_FORM)
+    setShowTxForm(false)
+  }
+
+  const handleRemoveTreatment = (localId: string) => {
+    const target = value.treatments.find((t) => t.localId === localId)
+    if (!target) return
+
+    if (target.treatmentId) {
+      patch({
+        treatments: value.treatments.map((t) =>
+          t.localId === localId ? { ...t, isDeleted: true } : t
+        ),
+      })
+    } else {
+      patch({ treatments: value.treatments.filter((t) => t.localId !== localId) })
     }
   }
 
@@ -620,6 +677,88 @@ export default function EncounterCard({ value, onChange }: EncounterCardProps) {
           >
             <Plus className="mr-1 h-4 w-4" />
             Add vital / observation
+          </Button>
+        )}
+      </div>
+
+      {/* ── Treatments (Phase 2) ─────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        <Label>Treatment details</Label>
+
+        {visibleTreatments.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {visibleTreatments.map((tx) => (
+              <div
+                key={tx.localId}
+                className="flex items-start gap-3 rounded-lg border border-border px-3 py-2"
+              >
+                <div className="flex flex-1 flex-col gap-0.5">
+                  <p className="text-sm font-medium text-foreground">{tx.treatmentName}</p>
+                  {tx.notes && (
+                    <p className="text-xs text-muted-foreground">{tx.notes}</p>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => handleRemoveTreatment(tx.localId)}
+                  aria-label={`Remove ${tx.treatmentName}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showTxForm ? (
+          <div className="rounded-lg border border-border bg-muted/20 p-4">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="pv-tx-name">
+                  Treatment <span className="text-destructive">*</span>
+                </Label>
+                <TreatmentNameCombobox
+                  id="pv-tx-name"
+                  name={txForm.treatmentName}
+                  onNameChange={(v) => setTxForm({ ...txForm, treatmentName: v })}
+                  onSnippetSelect={handleTreatmentSnippetSelect}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="pv-tx-notes">Notes</Label>
+                <Input
+                  id="pv-tx-notes"
+                  placeholder="Optional notes"
+                  value={txForm.notes}
+                  onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleAddTreatment} className="flex-1">Add</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => { setTxForm(EMPTY_TX_FORM); setShowTxForm(false) }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-fit text-primary hover:text-primary/90"
+            onClick={() => setShowTxForm(true)}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Add treatment
           </Button>
         )}
       </div>
