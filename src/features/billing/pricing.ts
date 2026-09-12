@@ -9,28 +9,41 @@ import type {
 /**
  * PRICING — single source of truth.
  *
- * Locked model: flat per-clinic tiers differentiated by doctor count only.
+ * Base model: flat per-clinic tiers differentiated by doctor count.
  * Every tier includes every feature (patient portal, care plans, reminders,
- * analytics, pharmacy). There is no feature gating and no add-on pricing.
+ * analytics, pharmacy) — there is no feature gating.
  *
- * A clinic that outgrows its doctor limit upgrades tier; it never pays a
- * per-seat surcharge.
+ * SEAT ADD-ONS (added later, see git history for the original "no add-on
+ * pricing" decision this superseded): Solo and Clinic tiers allow buying
+ * extra doctor seats beyond the included limit, at a flat per-seat annual
+ * rate. Group is intentionally excluded — a clinic outgrowing 10 doctors
+ * moves to Enterprise instead of stacking add-ons indefinitely.
  */
 
-/** Undiscounted price per year, in paise. */
+/** Undiscounted tier price per year, in paise. */
 export const TIER_ANNUAL_PAISE: Readonly<Record<SelfServeTier, number>> = Object.freeze({
   solo: 1_400_000, // ₹14,000/yr — 1 doctor
   clinic: 2_800_000, // ₹28,000/yr — up to 4 doctors
   group: 6_000_000, // ₹60,000/yr — up to 10 doctors
 });
 
-/** Doctor seat limits. `null` = unlimited (enterprise, negotiated). */
+/** Doctor seat limits included in the base tier price. `null` = unlimited (enterprise, negotiated). */
 export const TIER_DOCTOR_LIMITS: Readonly<Record<SubscriptionTier, number | null>> =
   Object.freeze({
     solo: 1,
     clinic: 4,
     group: 10,
     enterprise: null,
+  });
+
+/**
+ * Per-seat annual add-on price, in paise. Only tiers present in this map
+ * support add-on seats at all — Group and Enterprise are absent on purpose.
+ */
+export const SEAT_ADDON_ANNUAL_PAISE: Readonly<Partial<Record<SelfServeTier, number>>> =
+  Object.freeze({
+    solo: 600_000, // ₹6,000/yr per additional seat
+    clinic: 700_000, // ₹7,000/yr per additional seat
   });
 
 /** Number of years covered by each term. */
@@ -43,7 +56,10 @@ export const TERM_YEARS: Readonly<Record<SubscriptionTerm, number>> = Object.fre
 /**
  * Prepayment discount in basis points, applied to the TOTAL for the term.
  * 1000 bp = 10%. Deliberately no 10-year term: too much forward liability
- * for a young company.
+ * for a young company. Also applied to seat add-ons purchased at initial
+ * checkout, for consistency with the base tier's prepay incentive — but
+ * NOT applied to mid-subscription (prorated) seat purchases, since those
+ * are inherently a partial-year charge already.
  */
 export const TERM_DISCOUNT_BP: Readonly<Record<SubscriptionTerm, number>> = Object.freeze({
   '1yr': 0,
@@ -92,12 +108,23 @@ export const GST_RATE_BP = 1800; // 18% on SaaS, applied only when registered
  * Math.round on the integer quotient gives banker-free half-up rounding to
  * the nearest paisa.
  */
-function applyBasisPoints(amountPaise: number, bp: number): number {
+export function applyBasisPoints(amountPaise: number, bp: number): number {
   return Math.round((amountPaise * bp) / 10_000);
 }
 
 export function isSelfServeTier(tier: SubscriptionTier): tier is SelfServeTier {
   return tier === 'solo' || tier === 'clinic' || tier === 'group';
+}
+
+/** Whether this tier supports buying add-on seats at all. */
+export function seatAddonSupported(tier: SubscriptionTier): tier is 'solo' | 'clinic' {
+  return tier === 'solo' || tier === 'clinic';
+}
+
+/** Per-seat annual add-on price for a tier, or null if unsupported. */
+export function getSeatAddonAnnualPaise(tier: SubscriptionTier): number | null {
+  if (!seatAddonSupported(tier)) return null;
+  return SEAT_ADDON_ANNUAL_PAISE[tier] ?? null;
 }
 
 /**
@@ -143,21 +170,92 @@ export function computePrice(
   };
 }
 
-/** Seat limit for a tier. `null` means unlimited. */
+/**
+ * Full-term price for N add-on seats bought alongside a fresh subscription
+ * checkout. Same term discount as the base tier applies. Returns 0 if the
+ * tier doesn't support add-ons or seats <= 0.
+ */
+export function computeSeatAddonPriceForNewTerm(
+  tier: SubscriptionTier,
+  term: SubscriptionTerm,
+  seats: number,
+): number {
+  const perSeatAnnual = getSeatAddonAnnualPaise(tier);
+  if (perSeatAnnual === null || seats <= 0) return 0;
+
+  const years = TERM_YEARS[term];
+  const discountBp = TERM_DISCOUNT_BP[term];
+
+  const listPaise = perSeatAnnual * years * seats;
+  const discountPaise = applyBasisPoints(listPaise, discountBp);
+  return listPaise - discountPaise;
+}
+
+/**
+ * Prorated price for N add-on seats bought mid-subscription, based on days
+ * remaining until the current term ends. No multi-year discount applies —
+ * proration is inherently a partial-year charge, not a prepay commitment.
+ */
+export function computeSeatAddonProratedPrice(
+  tier: SubscriptionTier,
+  seats: number,
+  termEndsAt: Date,
+  now: Date = new Date(),
+): number {
+  const perSeatAnnual = getSeatAddonAnnualPaise(tier);
+  if (perSeatAnnual === null || seats <= 0) return 0;
+
+  const msRemaining = Math.max(0, termEndsAt.getTime() - now.getTime());
+  const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
+  const perSeatProrated = Math.round((perSeatAnnual / 365) * daysRemaining);
+  return perSeatProrated * seats;
+}
+
+/** Seat limit included in the base tier price. `null` means unlimited. */
 export function getDoctorLimit(tier: SubscriptionTier): number | null {
   return TIER_DOCTOR_LIMITS[tier];
 }
 
 /**
- * Whether a clinic with `doctorCount` doctors can sit on `tier`.
- * Used both to block over-limit downgrades and to disable tier cards at
- * checkout when a trial clinic has already added more doctors than fit.
+ * Effective doctor limit including purchased add-on seats. `null` means
+ * unlimited (enterprise). Group ignores addonSeats — it has no add-on
+ * option, so its limit is always the flat 10.
+ */
+export function getEffectiveDoctorLimit(
+  tier: SubscriptionTier,
+  addonSeats: number,
+): number | null {
+  const base = getDoctorLimit(tier);
+  if (base === null) return null;
+  if (!seatAddonSupported(tier)) return base;
+  return base + Math.max(0, addonSeats);
+}
+
+/**
+ * Whether a clinic with `doctorCount` doctors can sit on `tier` given its
+ * base limit alone (no add-ons). Used to block over-limit downgrades and
+ * to disable tier cards at checkout.
  */
 export function tierFitsDoctorCount(
   tier: SubscriptionTier,
   doctorCount: number,
 ): boolean {
   const limit = getDoctorLimit(tier);
+  return limit === null || doctorCount <= limit;
+}
+
+/**
+ * Whether a clinic with `doctorCount` doctors fits on `tier` once
+ * `addonSeats` extra seats are included. This is the authoritative check
+ * for checkout — always use this (not tierFitsDoctorCount alone) once
+ * add-on seats are part of the flow.
+ */
+export function fitsEffectiveDoctorCount(
+  tier: SubscriptionTier,
+  addonSeats: number,
+  doctorCount: number,
+): boolean {
+  const limit = getEffectiveDoctorLimit(tier, addonSeats);
   return limit === null || doctorCount <= limit;
 }
 
