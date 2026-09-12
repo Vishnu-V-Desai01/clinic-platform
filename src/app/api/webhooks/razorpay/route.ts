@@ -45,9 +45,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Verify the signature
-    const keySecret = process.env.RAZORPAY_KEY_SECRET
+    const keySecret = process.env.RAZORPAY_WEBHOOK_SECRET
     if (!keySecret) {
-      console.error('[razorpay webhook] RAZORPAY_KEY_SECRET not configured')
+      console.error('[razorpay webhook] RAZORPAY_WEBHOOK_SECRET not configured')
       return NextResponse.json(
         { error: 'Server misconfigured' },
         { status: 500 }
