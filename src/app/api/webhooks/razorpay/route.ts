@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createServiceSupabaseClient } from '@/lib/supabase/service'
 import { verifyRazorpaySignature } from '@/features/billing/webhooks'
 import { TERM_YEARS } from '@/features/billing/pricing'
 import type { SubscriptionTerm } from '@/features/billing/types'
@@ -57,16 +57,12 @@ export async function POST(req: NextRequest) {
     const isValid = verifyRazorpaySignature(body, signature, keySecret)
     if (!isValid) {
       console.warn('[razorpay webhook] Signature verification failed')
-      // Return 200 anyway so Razorpay doesn't retry — a signature failure
-      // means either the webhook is spoofed or our key is wrong, neither of
-      // which will be fixed by retry.
       return NextResponse.json({ ok: true }, { status: 200 })
     }
 
     // 3. Parse the webhook payload
     const payload: RazorpayWebhookPayload = JSON.parse(body)
 
-    // Only process payment success events
     if (
       payload.event !== 'payment.authorized' &&
       payload.event !== 'payment.captured'
@@ -83,7 +79,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Find the pending subscription matching this order
-    const supabase = createServerSupabaseClient()
+    const supabase = createServiceSupabaseClient()
 
     const { data: subscription, error: fetchError } = await supabase
       .from('subscriptions')
@@ -98,8 +94,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true }, { status: 200 })
     }
 
-    // Guard against double-processing: if this subscription is already
-    // active, the webhook was probably retried. Idempotency check.
     if (subscription.status !== 'pending') {
       console.info(
         `[razorpay webhook] Subscription ${subscription.id} already ${subscription.status}, ignoring retry`
@@ -112,20 +106,18 @@ export async function POST(req: NextRequest) {
     const term = subscription.term as SubscriptionTerm
     const years = TERM_YEARS[term]
 
-    // current_period_start = today (when payment confirmed)
     const periodStart = now
-    // current_period_end = today + term length
     const periodEnd = new Date(now)
     periodEnd.setFullYear(periodEnd.getFullYear() + years)
 
-    // 6. Update the subscription
+    // 6. Update the subscription — subscriptions table uses starts_at/ends_at
     const { error: updateSubError } = await supabase
       .from('subscriptions')
       .update({
         status: 'active',
         razorpay_payment_id: paymentId,
-        current_period_start: periodStart.toISOString(),
-        current_period_end: periodEnd.toISOString(),
+        starts_at: periodStart.toISOString(),
+        ends_at: periodEnd.toISOString(),
         updated_at: now.toISOString(),
       })
       .eq('id', subscription.id)
@@ -138,7 +130,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 7. Update the clinic's subscription status
+    // 7. Update the clinic's subscription status — clinics table uses
+    // current_period_start/current_period_end (different column names
+    // from the subscriptions table by design — separate schemas)
     const { error: updateClinicError } = await supabase
       .from('clinics')
       .update({
@@ -147,14 +141,12 @@ export async function POST(req: NextRequest) {
         subscription_term: term,
         current_period_start: periodStart.toISOString(),
         current_period_end: periodEnd.toISOString(),
-        trial_ends_at: null, // Clear trial end date now that they're paid
+        trial_ends_at: null,
       })
       .eq('id', subscription.clinic_id)
 
     if (updateClinicError) {
       console.error('[razorpay webhook] Failed to update clinic:', updateClinicError)
-      // Still return 200; the subscription is already marked active above,
-      // so retrying won't fix the clinic update. Log it for manual review.
       return NextResponse.json({ ok: true }, { status: 200 })
     }
 
@@ -165,7 +157,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true }, { status: 200 })
   } catch (err) {
     console.error('[razorpay webhook] Unexpected error:', err)
-    // Return 500 so Razorpay retries, but this should be rare if inputs are valid
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useTransition } from 'react'
 import {
   Card,
@@ -31,6 +31,13 @@ import {
 import { cn } from '@/lib/utils'
 import { createCheckoutOrderAction } from '@/features/billing/actions'
 import type { SubscriptionTier, SubscriptionTerm } from '@/features/billing/types'
+
+// Razorpay's checkout.js attaches this to window once loaded
+declare global {
+  interface Window {
+    Razorpay: any
+  }
+}
 
 interface Subscription {
   tier: SubscriptionTier | 'enterprise'
@@ -126,6 +133,24 @@ function termTotalPaise(perYearPaise: number, term: SubscriptionTerm): number {
   return Math.round(perYearPaise * years * (1 - discount))
 }
 
+/**
+ * Loads Razorpay's checkout.js script exactly once, idempotently.
+ * Returns a promise that resolves once window.Razorpay is available.
+ */
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true)
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.onload = () => resolve(true)
+    script.onerror = () => resolve(false)
+    document.body.appendChild(script)
+  })
+}
+
 // ─────────────────────────────────────────────────────────────
 // COMPONENT
 // ─────────────────────────────────────────────────────────────
@@ -142,6 +167,13 @@ export default function AdminBillingSettings({
   )
   const [isPending, startTransition] = useTransition()
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [scriptReady, setScriptReady] = useState(false)
+
+  // Preload the Razorpay script as soon as the component mounts, so it's
+  // ready by the time the user clicks "Proceed to Payment."
+  useEffect(() => {
+    loadRazorpayScript().then(setScriptReady)
+  }, [])
 
   // Compute trial/grace days
   const trialDaysLeft = useMemo(
@@ -165,11 +197,17 @@ export default function AdminBillingSettings({
   const years = TERM_CONFIG[selectedTerm].years
   const discountPct = TERM_CONFIG[selectedTerm].discount * 100
 
-  // Handle checkout — calls the server action
+  // Handle checkout — creates the order, then opens Razorpay's modal
   const handleCheckout = async () => {
     if (selectedTier === 'enterprise' || isPending) return
 
     setCheckoutError(null)
+
+    if (!scriptReady) {
+      setCheckoutError('Payment gateway is still loading, please try again in a moment.')
+      return
+    }
+
     startTransition(async () => {
       const result = await createCheckoutOrderAction(
         selectedTier as SubscriptionTier,
@@ -178,8 +216,48 @@ export default function AdminBillingSettings({
 
       if (!result.success) {
         setCheckoutError(result.error)
+        return
       }
-      // On success, the action handles redirect to Razorpay checkout
+
+      const { orderId, amount, currency, keyId } = result.data
+
+      // Open Razorpay's hosted checkout modal. The user completes payment
+      // here; on success, Razorpay's servers fire our webhook
+      // (/api/webhooks/razorpay) which activates the subscription.
+      const razorpayOptions = {
+        key: keyId,
+        amount,
+        currency,
+        order_id: orderId,
+        name: 'CURAKIN HealthTech',
+        description: `${TIER_DISPLAY[selectedTier].name} plan — ${selectedTerm}`,
+        handler: function () {
+          // Payment succeeded client-side. The webhook does the actual
+          // activation server-side, so here we just refresh the page to
+          // reflect the (soon-to-be) updated status. A short delay gives
+          // the webhook a moment to land before we reload.
+          setTimeout(() => {
+            window.location.reload()
+          }, 1500)
+        },
+        modal: {
+          ondismiss: function () {
+            // User closed the modal without paying — nothing to do,
+            // the pending subscription row just stays 'pending'.
+          },
+        },
+        theme: {
+          color: '#0f766e',
+        },
+      }
+
+      const rzp = new window.Razorpay(razorpayOptions)
+      rzp.on('payment.failed', function (response: any) {
+        setCheckoutError(
+          `Payment failed: ${response.error?.description || 'Please try again.'}`
+        )
+      })
+      rzp.open()
     })
   }
 
@@ -516,7 +594,7 @@ export default function AdminBillingSettings({
               >
                 {isPending && <Loader2 className="size-4 mr-2 animate-spin" />}
                 {isPending
-                  ? 'Redirecting to payment…'
+                  ? 'Processing…'
                   : selectedTier === 'enterprise'
                     ? 'Contact sales for Enterprise'
                     : 'Proceed to Payment'}
