@@ -75,7 +75,7 @@ function toFormValues(p: PatientRecord): PatientFormValues {
     allergies:             p.allergies,
     conditions:            p.conditions,
     notes:                 p.notes ?? "",
-    // Edit mode never re-asks for consent — an existing patient's consent
+    // Edit mode never re-asks for consent â€” an existing patient's consent
     // status is managed via their portal's granular toggle UI, not this
     // form. Set true here purely so this field can't accidentally block
     // updatePatient (which ignores it entirely regardless).
@@ -198,13 +198,13 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
   // Item 6: Age <-> DOB two-way sync.
   //
   // `dateOfBirth` + `dobIsApproximate` (both in `values`, both submitted)
-  // are the single source of truth — Age is only ever a VIEW of them, or
+  // are the single source of truth â€” Age is only ever a VIEW of them, or
   // a way to WRITE them, never a separately stored value.
   //
   // - A manually typed DOB is always exact: dobIsApproximate is forced
   //   false the moment the DOB field itself is edited, and Age becomes
   //   disabled, showing the computed value. This is the "DOB wins, stays
-  //   exact" precedence — entering both never lets Age silently overwrite
+  //   exact" precedence â€” entering both never lets Age silently overwrite
   //   a real date typed on purpose.
   // - Age is only editable when there's no exact DOB on file (empty, or
   //   itself previously derived from an Age entry). Typing an age derives
@@ -246,7 +246,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
     setAgeDraft(cleaned)
 
     if (cleaned === "") {
-      // Only clear DOB if it was derived from Age in the first place —
+      // Only clear DOB if it was derived from Age in the first place â€”
       // never touch an exact DOB (shouldn't be reachable while an exact
       // DOB is present, since the field is disabled then, but this keeps
       // the function safe regardless of caller).
@@ -264,16 +264,63 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
     set("dobIsApproximate", true)
   }
 
+  // ---------------------------------------------------------------------
+  // ITEM 1 FIX â€” registration/edit submit no longer hangs silently.
+  //
+  // ROOT CAUSE: the previous version called router.push(<detail url>)
+  // immediately followed by router.refresh(), both inside the same
+  // startTransition. refresh() re-validates the CURRENT route's server
+  // data while push()'s navigation to a NEW route is still in flight â€”
+  // the two compete inside the same transition, and refresh() can win,
+  // silently discarding the pending push with no thrown error and
+  // nothing in the console. That matched the reported symptom exactly:
+  // the patient row was created successfully, but the screen never
+  // changed and the URL never moved.
+  //
+  // FIX:
+  //   1. Drop the redundant router.refresh() call. It's only needed when
+  //      staying on the current page and re-fetching its data â€” a
+  //      navigation to a brand-new route (via push) already fetches
+  //      fresh server data for that route on its own.
+  //   2. Redirect to the patient LIST after a successful registration
+  //      (per explicit request), not the detail page.
+  //   3. Wrap the whole transition body in try/catch. createPatient /
+  //      updatePatient are designed to always resolve to
+  //      {success:false, error} rather than throw, but requireRole()
+  //      inside them currently sits outside their own try/catch â€” if a
+  //      session/auth call ever throws for an unrelated reason, this
+  //      catch is what guarantees isPending still resolves and the
+  //      button never gets stuck again, regardless of the cause.
+  // ---------------------------------------------------------------------
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     startTransition(async () => {
-      const result = isEdit
-        ? await updatePatient(patient!.id, values)
-        : await createPatient(values)
-      if (!result.success) { setError(result.error); return }
-      router.push(`/dashboard/patients/${result.data.id}`)
-      router.refresh()
+      try {
+        const result = isEdit
+          ? await updatePatient(patient!.id, values)
+          : await createPatient(values)
+
+        if (!result.success) {
+          setError(result.error)
+          return
+        }
+
+        if (isEdit) {
+          // Edit mode stays useful as a detail-page redirect + refresh,
+          // since the user is returning to view the record they just
+          // changed and that page's data does need revalidating.
+          router.push(`/dashboard/patients/${result.data.id}`)
+          router.refresh()
+        } else {
+          // Create mode: go straight to the patient list. No refresh()
+          // needed â€” the list page fetches fresh data on navigation.
+          router.push("/dashboard/patients")
+        }
+      } catch (err) {
+        console.error("[PatientForm] submit failed:", err)
+        setError("Something went wrong. Please try again.")
+      }
     })
   }
 
@@ -305,7 +352,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
               </h1>
               {isEdit && (
                 <p className="text-sm text-muted-foreground">
-                  {values.firstName} {values.lastName} • MRN: {values.mrn}
+                  {values.firstName} {values.lastName} â€¢ MRN: {values.mrn}
                 </p>
               )}
             </div>
@@ -371,7 +418,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
                     />
                     {values.dobIsApproximate && values.dateOfBirth && (
                       <p className="text-xs text-muted-foreground">
-                        Approximate — saved as {values.dateOfBirth}
+                        Approximate â€” saved as {values.dateOfBirth}
                       </p>
                     )}
                   </div>
@@ -582,7 +629,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
                 <div className="flex flex-col gap-2">
                   <FieldLabel htmlFor="notes">Notes</FieldLabel>
                   <Textarea id="notes" value={values.notes}
-                    placeholder="Any other relevant history…"
+                    placeholder="Any other relevant historyâ€¦"
                     className="min-h-28 rounded-md focus-visible:ring-2 focus-visible:ring-sky-500"
                     onChange={(e) => set("notes", e.target.value)} />
                 </div>
@@ -631,7 +678,7 @@ export default function PatientForm({ mode, patient, role, doctorOptions }: Pati
             className="gap-2 bg-sky-500 text-white hover:bg-sky-600">
             <Check className="size-4" />
             {isPending
-              ? isEdit ? "Saving…" : "Registering…"
+              ? isEdit ? "Saving..." : "Registering..."
               : isEdit ? "Save Changes" : "Register Patient"}
           </Button>
         </div>
