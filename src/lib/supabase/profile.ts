@@ -47,12 +47,7 @@ console.log('[getOrCreateProfile] executing query for', user.id)
   return existing as Profile | null
 })
 
-// Clinic detail fields are all optional â€” matches the optionality of the
-// same fields on clinic-settings-form.tsx, so a new admin can skip them at
-// signup and fill them in later via Settings. tosVersion is required: the
-// server action always supplies it from legal-content.ts, and the RPC
-// itself refuses to create a clinic without it (defense-in-depth).
-// Clinic detail fields are all optional â€” matches the optionality of the
+// Clinic detail fields are all optional -- matches the optionality of the
 // same fields on clinic-settings-form.tsx, so a new admin can skip them at
 // signup and fill them in later via Settings. fullNameOverride follows the
 // same pattern as acceptStaffInvitation below: Clerk doesn't always supply
@@ -61,6 +56,23 @@ console.log('[getOrCreateProfile] executing query for', user.id)
 // null. tosVersion is required: the server action always supplies it from
 // legal-content.ts, and the RPC itself refuses to create a clinic without
 // it (defense-in-depth).
+//
+// SECURITY (Item 1 -- clinic-creation boundary): this function backs a
+// server action, which is a public POST endpoint. It must refuse every
+// caller who is not a genuinely new clinic owner, independently of what
+// the UI shows. Guards, all fail-closed (any lookup error = refuse):
+//   1. Signed in with Clerk.
+//   2. Has a VERIFIED PRIMARY email. emailAddresses[0] is not guaranteed
+//      to be the primary or verified address, so it is not used here.
+//      Phone-only (OTP) accounts have no email and are refused.
+//   3. Has no profile of any kind (patient, doctor, staff).
+//   4. Email does not belong to an existing patient record -- otherwise a
+//      patient who wandered into this flow would become a "doctor" and be
+//      locked out of their own family portal.
+// The holds-a-family-login check lives in the DB function (Item 1 step 2),
+// not here: family_accounts is RLS-scoped, so from this client a
+// no-profile caller would see an empty result and the check would pass
+// silently.
 export async function createClinicAndBecomeAdmin(input: {
   clinicName: string
   fullNameOverride?: string
@@ -75,18 +87,61 @@ export async function createClinicAndBecomeAdmin(input: {
   hfrId?: string | null
   tosVersion: string
 }): Promise<Profile> {
+  // Guard 1: authenticated.
   const user = await currentUser()
   if (!user) throw new Error('Not authenticated')
+
+  // Guard 2: verified primary email.
+  const primaryEmail = user.primaryEmailAddress
+  const verifiedEmail =
+    primaryEmail && primaryEmail.verification?.status === 'verified'
+      ? primaryEmail.emailAddress
+      : null
+  if (!verifiedEmail) {
+    throw new Error(
+      'Setting up a clinic needs a verified email address. Please sign up with your email or Google account.'
+    )
+  }
+
+  const supabase = createServerSupabaseClient()
+
+  // Guard 3: no existing profile. Own query (not getOrCreateProfile) so a
+  // lookup error refuses instead of being read as "no profile".
+  const { data: existingProfile, error: existingProfileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', user.id)
+    .maybeSingle()
+
+  if (existingProfileError) {
+    throw new Error('We could not verify your account. Please try again.')
+  }
+  if (existingProfile) {
+    throw new Error('Your account is already set up. Please go to your dashboard.')
+  }
+
+  // Guard 4: email not linked to an existing patient record.
+  const { data: isPatientEmail, error: patientCheckError } = await supabase.rpc(
+    'email_matches_existing_patient',
+    { p_email: verifiedEmail }
+  )
+
+  if (patientCheckError) {
+    throw new Error('We could not verify your account. Please try again.')
+  }
+  if (isPatientEmail) {
+    throw new Error(
+      'This email is linked to a patient record. If you are a patient, please use the link your clinic sent you on WhatsApp. If you are a doctor setting up a new clinic, please contact CURAKIN support.'
+    )
+  }
 
   const clerkName = user.firstName
     ? `${user.firstName} ${user.lastName ?? ''}`.trim()
     : null
 
-  const supabase = createServerSupabaseClient()
-
   const { data, error } = await supabase.rpc('create_clinic_and_become_admin', {
     p_clinic_name: input.clinicName,
-    p_email: user.emailAddresses[0]?.emailAddress ?? '',
+    p_email: verifiedEmail,
     p_full_name: input.fullNameOverride?.trim() || clerkName,
     p_clinic_phone: input.phone ?? null,
     p_clinic_contact_email: input.contactEmail ?? null,
