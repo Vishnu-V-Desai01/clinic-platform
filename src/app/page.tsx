@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SignOutButton } from '@clerk/nextjs'
 import { currentUser } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { Building2, UserRound } from 'lucide-react'
@@ -82,6 +83,17 @@ export default async function RootPage() {
         <p className="text-xs text-muted-foreground text-center leading-relaxed">
           Invited by an existing clinic? Use the invitation link from your email instead.
         </p>
+
+        <div className="text-center">
+          <SignOutButton>
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Signed in with the wrong account? Sign out
+            </button>
+          </SignOutButton>
+        </div>
       </div>
     </div>
   )
