@@ -16,14 +16,9 @@ import type {
  * SEAT ADD-ONS (added later, see git history for the original "no add-on
  * pricing" decision this superseded): Solo and Clinic tiers allow buying
  * extra doctor seats beyond the included limit, at a flat per-seat annual
-<<<<<<< HEAD
- * rate. Group is intentionally excluded — a clinic outgrowing 10 doctors
- * moves to Enterprise instead of stacking add-ons indefinitely.
-=======
  * rate, capped per tier (see MAX_ADDON_SEATS). Group is intentionally
  * excluded — a clinic outgrowing 10 doctors moves to Enterprise instead of
  * stacking add-ons indefinitely.
->>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
  */
 
 /** Undiscounted tier price per year, in paise. */
@@ -52,8 +47,6 @@ export const SEAT_ADDON_ANNUAL_PAISE: Readonly<Partial<Record<SelfServeTier, num
     clinic: 700_000, // ₹7,000/yr per additional seat
   });
 
-<<<<<<< HEAD
-=======
 /**
  * Maximum add-on seats purchasable per tier, across the tier's entire
  * active term (initial checkout + all mid-term purchases combined).
@@ -65,7 +58,6 @@ export const MAX_ADDON_SEATS: Readonly<Partial<Record<SelfServeTier, number>>> =
   clinic: 2,
 });
 
->>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
 /** Number of years covered by each term. */
 export const TERM_YEARS: Readonly<Record<SubscriptionTerm, number>> = Object.freeze({
   '1yr': 1,
@@ -147,8 +139,6 @@ export function getSeatAddonAnnualPaise(tier: SubscriptionTier): number | null {
   return SEAT_ADDON_ANNUAL_PAISE[tier] ?? null;
 }
 
-<<<<<<< HEAD
-=======
 /** Max add-on seats for a tier, or null if the tier has no cap concept (unsupported/unlimited). */
 export function getMaxAddonSeats(tier: SubscriptionTier): number | null {
   if (!seatAddonSupported(tier)) return null;
@@ -173,7 +163,6 @@ export function canPurchaseAddonSeats(
   return existingActiveSeats + requestedSeats <= max;
 }
 
->>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
 /**
  * Computes the exact amount to charge for a tier + term.
  *
