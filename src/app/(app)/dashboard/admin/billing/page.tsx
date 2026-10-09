@@ -37,16 +37,18 @@ export default async function BillingPage() {
     redirect('/onboarding')
   }
 
-  const { data: invoices } = await supabase
+  // invoices stores the charged amount in total_paise (subtotal + any GST)
+  const { data: invoices, error: invoicesError } = await supabase
     .from('invoices')
-    .select('id, issued_at, description, amount_paise, status')
+    .select('id, issued_at, description, total_paise, status')
     .eq('clinic_id', profile.clinic_id)
     .order('issued_at', { ascending: false })
     .limit(10)
 
-  // Doctors currently on staff — mirrors the server-side checks in
-  // createCheckoutOrderAction / purchaseSeatAddonAction, here just for
-  // display/UX (disabling tier cards that no longer fit, etc).
+  if (invoicesError) {
+    console.error('[BillingPage] invoices query failed:', invoicesError)
+  }
+
   const { count: doctorCount } = await supabase
     .from('profiles')
     .select('id', { count: 'exact', head: true })
@@ -54,9 +56,6 @@ export default async function BillingPage() {
     .eq('role', 'doctor')
     .in('status', ['active', 'suspended'])
 
-  // Add-on seats already purchased and active for the current term. Only
-  // meaningful once the clinic has an active (paid) subscription — during
-  // trial this is always 0, since seat add-ons require an active plan.
   const { data: activeAddonSeats } = await supabase.rpc('get_active_addon_seats', {
     p_clinic_id: profile.clinic_id,
   })
@@ -86,7 +85,7 @@ export default async function BillingPage() {
             id: inv.id,
             date: inv.issued_at,
             description: inv.description || 'Subscription payment',
-            amountPaise: inv.amount_paise,
+            amountPaise: inv.total_paise,
             status: 'paid' as const,
           })) || []
         }
