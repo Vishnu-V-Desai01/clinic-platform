@@ -750,9 +750,11 @@ export default function AdminBillingSettings({
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled
-                          className="h-6 w-6 p-0 opacity-50"
-                          title="Invoice download coming soon"
+                          className="h-6 w-6 p-0"
+                          title="Download invoice (PDF)"
+                          onClick={() =>
+                            window.open(`/api/billing/invoices/${invoice.id}/pdf`, '_blank')
+                          }
                         >
                           <Download className="size-4" />
                         </Button>
