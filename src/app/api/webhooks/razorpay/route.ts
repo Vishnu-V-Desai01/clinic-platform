@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceSupabaseClient } from '@/lib/supabase/service'
 import { verifyRazorpaySignature } from '@/features/billing/webhooks'
-import { TERM_YEARS } from '@/features/billing/pricing'
+import {
+  CURAKIN_GSTIN,
+  GST_MODE,
+  GST_RATE_BP,
+  TERM_YEARS,
+} from '@/features/billing/pricing'
 import type { SubscriptionTerm } from '@/features/billing/types'
 
 type RazorpayWebhookEvent = 'payment.authorized' | 'payment.captured' | 'payment.failed'
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest) {
 
     const paymentId = payload.payload.payment.entity.id
     const orderId = payload.payload.payment.entity.order_id
+    const chargedPaise = payload.payload.payment.entity.amount
 
     if (!paymentId || !orderId) {
       console.warn('[razorpay webhook] Missing payment_id or order_id')
@@ -59,13 +65,12 @@ export async function POST(req: NextRequest) {
     const now = new Date()
 
     // ─────────────────────────────────────────────────────────
-    // Case 1: this order_id matches a base subscription purchase
-    // (fresh checkout — may or may not have accompanying add-on seats
-    // sharing the same order_id, since both can be paid in one charge)
+    // Case 1: order matches a base subscription purchase (fresh
+    // checkout, possibly bundled with add-on seats in the same order)
     // ─────────────────────────────────────────────────────────
     const { data: subscription, error: fetchSubError } = await supabase
       .from('subscriptions')
-      .select('id, clinic_id, tier, term, status, amount_paise')
+      .select('id, clinic_id, tier, term, status')
       .eq('razorpay_order_id', orderId)
       .maybeSingle()
 
@@ -120,13 +125,14 @@ export async function POST(req: NextRequest) {
         console.error('[razorpay webhook] Failed to update clinic:', updateClinicError)
       }
 
-      // If add-on seats were bought in the SAME order as this subscription
-      // (initial checkout with seats), activate that row too.
+      // Seats bought in the same order as this subscription (checkout with seats)
       const { data: bundledAddon, error: bundledAddonFetchError } = await supabase
         .from('subscription_seat_addons')
-        .select('id, status')
+        .select('id, status, seats')
         .eq('razorpay_order_id', orderId)
         .maybeSingle()
+
+      let bundledSeats = 0
 
       if (bundledAddonFetchError) {
         console.error(
@@ -145,21 +151,21 @@ export async function POST(req: NextRequest) {
 
         if (addonUpdateError) {
           console.error('[razorpay webhook] Failed to activate bundled seat addon:', addonUpdateError)
+        } else {
+          bundledSeats = bundledAddon.seats
         }
       }
-
-      // Generate an invoice for the combined payment. Not fatal if it
-      // fails — the subscription is already active, which is what
-      // actually gates access.
-      const invoiceAmountPaise =
-        subscription.amount_paise +
-        (bundledAddon && bundledAddon.status === 'pending' ? 0 : 0) // amount already includes addon at order level if bundled; see note below
 
       await createInvoice(supabase, {
         clinicId: subscription.clinic_id,
         subscriptionId: subscription.id,
-        amountPaise: payload.payload.payment.entity.amount, // authoritative: what was actually charged
-        description: `${subscription.tier} plan — ${term}`,
+        paymentId,
+        totalPaise: chargedPaise,
+        description:
+          `${subscription.tier} plan — ${term}` +
+          (bundledSeats > 0
+            ? ` + ${bundledSeats} add-on seat${bundledSeats > 1 ? 's' : ''}`
+            : ''),
         now,
       })
 
@@ -171,13 +177,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ─────────────────────────────────────────────────────────
-    // Case 2: this order_id matches a standalone mid-subscription seat
-    // purchase (no matching subscriptions row — the base subscription is
-    // already active and unaffected by this payment)
+    // Case 2: order matches a standalone mid-subscription seat purchase
     // ─────────────────────────────────────────────────────────
     const { data: addon, error: fetchAddonError } = await supabase
       .from('subscription_seat_addons')
-      .select('id, clinic_id, seats, status, amount_paise')
+      .select('id, clinic_id, subscription_id, seats, status')
       .eq('razorpay_order_id', orderId)
       .maybeSingle()
 
@@ -214,9 +218,10 @@ export async function POST(req: NextRequest) {
 
     await createInvoice(supabase, {
       clinicId: addon.clinic_id,
-      subscriptionId: null,
-      amountPaise: payload.payload.payment.entity.amount,
-      description: `${addon.seats} additional doctor seat${addon.seats > 1 ? 's' : ''}`,
+      subscriptionId: addon.subscription_id,
+      paymentId,
+      totalPaise: chargedPaise,
+      description: `${addon.seats} additional doctor seat${addon.seats > 1 ? 's' : ''} (prorated)`,
       now,
     })
 
@@ -230,16 +235,21 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * Shared invoice-creation helper. Not fatal if it fails — logged for
- * manual follow-up, since the payment itself is already confirmed and
- * activated by the time this runs.
+ * Creates the invoice row for a confirmed payment. Not fatal if it fails:
+ * the payment is already confirmed and access already activated, so a
+ * failure is logged for manual follow-up rather than failing the webhook.
+ *
+ * Snapshots the GST treatment in force at payment time, so a later change
+ * to the pricing.ts constants never alters an invoice already issued.
+ * `totalPaise` is what Razorpay actually charged.
  */
 async function createInvoice(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
   args: {
     clinicId: string
     subscriptionId: string | null
-    amountPaise: number
+    paymentId: string
+    totalPaise: number
     description: string
     now: Date
   }
@@ -253,12 +263,24 @@ async function createInvoice(
     return
   }
 
+  const gstApplies = GST_MODE === 'exclusive'
+  const subtotalPaise = gstApplies
+    ? Math.round((args.totalPaise * 10_000) / (10_000 + GST_RATE_BP))
+    : args.totalPaise
+  const gstAmountPaise = args.totalPaise - subtotalPaise
+
   const { error: invoiceInsertError } = await supabase.from('invoices').insert({
     clinic_id: args.clinicId,
     subscription_id: args.subscriptionId,
     invoice_number: invoiceNumber,
-    amount_paise: args.amountPaise,
-    currency: 'INR',
+    razorpay_payment_id: args.paymentId,
+    subtotal_paise: subtotalPaise,
+    gst_mode: GST_MODE,
+    gst_rate_bp: gstApplies ? GST_RATE_BP : 0,
+    gst_amount_paise: gstAmountPaise,
+    total_paise: args.totalPaise,
+    seller_gstin: CURAKIN_GSTIN,
+    buyer_gstin: null,
     status: 'paid',
     description: args.description,
     issued_at: args.now.toISOString(),

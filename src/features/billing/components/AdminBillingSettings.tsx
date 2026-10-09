@@ -37,6 +37,10 @@ import {
   computePrice,
   computeSeatAddonPriceForNewTerm,
   formatPaise,
+<<<<<<< HEAD
+=======
+  getMaxAddonSeats,
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
   getSeatAddonAnnualPaise,
   seatAddonSupported,
   tierFitsDoctorCount,
@@ -214,6 +218,10 @@ export default function AdminBillingSettings({
 
   const selectedAddonSupported = seatAddonSupported(selectedTier)
   const selectedAddonAnnualPaise = getSeatAddonAnnualPaise(selectedTier)
+<<<<<<< HEAD
+=======
+  const selectedAddonMax = getMaxAddonSeats(selectedTier) ?? 0
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
   const selectedAddonPaise =
     selectedTier !== 'enterprise'
       ? computeSeatAddonPriceForNewTerm(selectedTier, selectedTerm, checkoutAddonSeats)
@@ -222,6 +230,7 @@ export default function AdminBillingSettings({
   const selectedBaseTotalPaise = selectedQuote?.kind === 'priced' ? selectedQuote.totalPaise : 0
   const selectedGrandTotalPaise = selectedBaseTotalPaise + selectedAddonPaise
 
+<<<<<<< HEAD
   const selectedEffectiveLimit =
     selectedTier === 'enterprise'
       ? null
@@ -235,6 +244,8 @@ export default function AdminBillingSettings({
   const baseLimitFits =
     selectedTier === 'enterprise' ? true : tierFitsDoctorCount(selectedTier, currentDoctorCount)
 
+=======
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
   const effectiveLimitForSelection = (() => {
     if (selectedTier === 'enterprise') return null
     const base =
@@ -245,6 +256,16 @@ export default function AdminBillingSettings({
 
   const selectionFits =
     effectiveLimitForSelection === null || currentDoctorCount <= effectiveLimitForSelection
+<<<<<<< HEAD
+=======
+
+  const canBuyMidTermSeats =
+    subscription.status === 'active' && seatAddonSupported(subscription.tier)
+
+  const remainingMidTermSeatRoom = canBuyMidTermSeats
+    ? Math.max(0, (getMaxAddonSeats(subscription.tier) ?? 0) - activeAddonSeats)
+    : 0
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
 
   const handleCheckout = async () => {
     if (selectedTier === 'enterprise' || isPending || !selectionFits) return
@@ -276,6 +297,36 @@ export default function AdminBillingSettings({
         () => window.location.reload(),
         (message) => setCheckoutError(message)
       )
+<<<<<<< HEAD
+=======
+    })
+  }
+
+  const handleMidTermPurchase = async () => {
+    if (isMidTermPending || midTermSeats <= 0) return
+
+    setMidTermError(null)
+
+    if (!scriptReady) {
+      setMidTermError('Payment gateway is still loading, please try again in a moment.')
+      return
+    }
+
+    startMidTermTransition(async () => {
+      const result = await purchaseSeatAddonAction(midTermSeats)
+
+      if (!result.success) {
+        setMidTermError(result.error)
+        return
+      }
+
+      openRazorpayCheckout(
+        result.data,
+        `${midTermSeats} additional doctor seat${midTermSeats > 1 ? 's' : ''} (prorated)`,
+        () => window.location.reload(),
+        (message) => setMidTermError(message)
+      )
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
     })
   }
 
@@ -410,8 +461,13 @@ export default function AdminBillingSettings({
                   variant="outline"
                   size="icon"
                   className="h-8 w-8"
+<<<<<<< HEAD
                   onClick={() => setMidTermSeats((s) => s + 1)}
                   disabled={isMidTermPending}
+=======
+                  onClick={() => setMidTermSeats((s) => Math.min(remainingMidTermSeatRoom, s + 1))}
+                  disabled={isMidTermPending || midTermSeats >= remainingMidTermSeatRoom}
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
                 >
                   <Plus className="size-3" />
                 </Button>
@@ -422,6 +478,16 @@ export default function AdminBillingSettings({
               </div>
             </div>
 
+<<<<<<< HEAD
+=======
+            {remainingMidTermSeatRoom <= 0 && (
+              <p className="text-xs text-muted-foreground">
+                You&apos;ve reached the maximum add-on seats for this plan (
+                {getMaxAddonSeats(subscription.tier)}).
+              </p>
+            )}
+
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
             {midTermError && (
               <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
                 {midTermError}
@@ -430,6 +496,7 @@ export default function AdminBillingSettings({
 
             <Button
               onClick={handleMidTermPurchase}
+<<<<<<< HEAD
               disabled={isMidTermPending}
               variant="outline"
               className="w-full"
@@ -455,16 +522,20 @@ export default function AdminBillingSettings({
             <Tabs
               value={selectedTerm}
               onValueChange={(v) => setSelectedTerm(v as SubscriptionTerm)}
+=======
+              disabled={isMidTermPending || remainingMidTermSeatRoom <= 0}
+              variant="outline"
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="1yr">1 Year</TabsTrigger>
-                <TabsTrigger value="3yr">3 Years (−10%)</TabsTrigger>
-                <TabsTrigger value="5yr">5 Years (−20%)</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+              {isMidTermPending && <Loader2 className="size-4 mr-2 animate-spin" />}
+              {isMidTermPending ? 'Processing…' : 'Buy Seats Now'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
+<<<<<<< HEAD
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {SELF_SERVE_TIERS.map((tier) => {
               const quote = quotesByTier[tier]
@@ -670,6 +741,273 @@ export default function AdminBillingSettings({
           </Card>
         </CardContent>
       </Card>
+=======
+      {/* PLAN SELECTION — locked summary if already active, full picker otherwise */}
+      {subscription.status === 'active' ? (
+        <Card className="border border-border">
+          <CardHeader>
+            <CardTitle className="text-base">Your Plan</CardTitle>
+            <CardDescription className="text-xs">
+              Your subscription is active. Plan changes mid-term aren&apos;t self-serve yet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between p-4 rounded-md bg-card border border-border">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {TIER_DISPLAY[subscription.tier].name} — {subscription.term}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {TIER_DISPLAY[subscription.tier].doctorLimit}
+                  {activeAddonSeats > 0 &&
+                    ` + ${activeAddonSeats} add-on seat${activeAddonSeats > 1 ? 's' : ''}`}
+                </p>
+              </div>
+              {subscription.renewsAt && (
+                <Badge variant="secondary" className="text-xs">
+                  Renews {formatDate(subscription.renewsAt)}
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Need a different plan before renewal? Contact support to avoid a duplicate charge.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border border-border">
+          <CardHeader>
+            <CardTitle className="text-base">Select Your Plan</CardTitle>
+            <CardDescription className="text-xs">
+              All features included on every plan — plans differ only by doctor limit.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Subscription term</p>
+              <Tabs
+                value={selectedTerm}
+                onValueChange={(v) => setSelectedTerm(v as SubscriptionTerm)}
+                className="w-full"
+              >
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="1yr">1 Year</TabsTrigger>
+                  <TabsTrigger value="3yr">3 Years (−10%)</TabsTrigger>
+                  <TabsTrigger value="5yr">5 Years (−20%)</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {SELF_SERVE_TIERS.map((tier) => {
+                const quote = quotesByTier[tier]
+                if (quote.kind !== 'priced') return null
+                const fits = tierFitsDoctorCount(tier, currentDoctorCount)
+                const monthlyPaise = Math.round(quote.totalPaise / (quote.years * 12))
+
+                return (
+                  <Card
+                    key={tier}
+                    className={cn(
+                      'transition-all border',
+                      !fits && 'opacity-50',
+                      fits && 'cursor-pointer',
+                      selectedTier === tier
+                        ? 'ring-2 ring-primary border-primary'
+                        : 'border-border hover:border-primary/50'
+                    )}
+                    onClick={() => fits && setSelectedTier(tier)}
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-sm">{TIER_DISPLAY[tier].name}</CardTitle>
+                          <CardDescription className="text-xs mt-1">
+                            {TIER_DISPLAY[tier].doctorLimit}
+                          </CardDescription>
+                        </div>
+                        {selectedTier === tier && subscription.tier === tier && (
+                          <Badge variant="secondary" className="text-xs">
+                            Current
+                          </Badge>
+                        )}
+                        {selectedTier === tier && subscription.tier !== tier && (
+                          <Badge variant="secondary" className="text-xs">
+                            Selected
+                          </Badge>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-2">
+                      <div className="text-xl font-bold text-foreground">
+                        {formatPaise(quote.listPaise / quote.years)}/yr
+                      </div>
+                      {selectedTerm !== '1yr' && (
+                        <div className="text-xs text-muted-foreground">
+                          {formatPaise(quote.totalPaise)} for {quote.years} years · save{' '}
+                          {quote.discountBp / 100}%
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        {formatPaise(monthlyPaise)}/mo
+                      </div>
+                      {seatAddonSupported(tier) && (
+                        <div className="text-xs text-muted-foreground pt-1">
+                          +{formatPaise(getSeatAddonAnnualPaise(tier) ?? 0)}/yr per extra seat
+                          (max {getMaxAddonSeats(tier)})
+                        </div>
+                      )}
+                      {TIER_DISPLAY[tier].description && (
+                        <div className="text-xs text-muted-foreground pt-1">
+                          {TIER_DISPLAY[tier].description}
+                        </div>
+                      )}
+                      {!fits && (
+                        <div className="text-xs text-destructive pt-1">
+                          Your clinic has more doctors than this plan allows.
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+
+              <Card
+                className={cn(
+                  'cursor-pointer transition-all border md:col-span-3',
+                  selectedTier === 'enterprise'
+                    ? 'ring-2 ring-primary border-primary'
+                    : 'border-border hover:border-primary/50'
+                )}
+                onClick={() => setSelectedTier('enterprise')}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Building2 className="size-4" />
+                        {TIER_DISPLAY.enterprise.name}
+                      </CardTitle>
+                      <CardDescription className="text-xs mt-1">
+                        {TIER_DISPLAY.enterprise.doctorLimit}
+                      </CardDescription>
+                    </div>
+                    {selectedTier === 'enterprise' && subscription.tier === 'enterprise' && (
+                      <Badge variant="secondary" className="text-xs">
+                        Current
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <div className="text-lg font-semibold text-foreground">Custom pricing</div>
+                  <p className="text-xs text-muted-foreground">
+                    Contact our sales team for a custom quote.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {selectedAddonSupported && (
+              <div className="flex items-center justify-between p-3 rounded-md bg-card border border-border">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-foreground">
+                    Add extra doctor seats
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    {formatPaise(selectedAddonAnnualPaise ?? 0)}/yr per seat, same term discount
+                    applies. Max {selectedAddonMax} seat{selectedAddonMax === 1 ? '' : 's'}.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setCheckoutAddonSeats((s) => Math.max(0, s - 1))}
+                  >
+                    <Minus className="size-3" />
+                  </Button>
+                  <span className="w-6 text-center text-sm font-medium">{checkoutAddonSeats}</span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() =>
+                      setCheckoutAddonSeats((s) => Math.min(selectedAddonMax, s + 1))
+                    }
+                    disabled={checkoutAddonSeats >= selectedAddonMax}
+                  >
+                    <Plus className="size-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="text-xs text-muted-foreground px-1 flex items-start gap-2">
+              <BadgeCheck className="size-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <p>
+                  <span className="font-medium">Pharmacy module included</span> on all plans, plus
+                  unlimited staff members. Plans differ only by doctor limits and support level.
+                </p>
+              </div>
+            </div>
+
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="pt-6 flex flex-col gap-4">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm text-muted-foreground">Total:</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {selectedTier === 'enterprise' ? 'Custom' : formatPaise(selectedGrandTotalPaise)}
+                  </p>
+                  {selectedTier !== 'enterprise' && (
+                    <p className="text-xs text-muted-foreground">
+                      for {selectedYears} year{selectedYears > 1 ? 's' : ''} (
+                      {TIER_DISPLAY[selectedTier].name})
+                      {checkoutAddonSeats > 0 &&
+                        ` + ${checkoutAddonSeats} seat${checkoutAddonSeats > 1 ? 's' : ''}`}
+                      {selectedDiscountPct > 0 && ` · ${selectedDiscountPct}% prepay discount applied`}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Prices are final (not GST-registered).
+                  </p>
+                </div>
+
+                {!selectionFits && selectedTier !== 'enterprise' && (
+                  <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
+                    This plan (with the selected add-on seats) supports fewer doctors than your
+                    clinic currently has ({currentDoctorCount}). Add more seats or choose a higher
+                    tier.
+                  </div>
+                )}
+
+                {checkoutError && (
+                  <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
+                    {checkoutError}
+                  </div>
+                )}
+
+                <Button
+                  onClick={handleCheckout}
+                  disabled={isPending || selectedTier === 'enterprise' || !selectionFits}
+                  size="lg"
+                  className="w-full"
+                >
+                  {isPending && <Loader2 className="size-4 mr-2 animate-spin" />}
+                  {isPending
+                    ? 'Processing…'
+                    : selectedTier === 'enterprise'
+                      ? 'Contact sales for Enterprise'
+                      : 'Proceed to Payment'}
+                </Button>
+              </CardContent>
+            </Card>
+          </CardContent>
+        </Card>
+      )}
+>>>>>>> cc8f172 (feat(billing): cap add-on seats at 2 per tier, block checkout when subscription already active)
 
       {/* SUBSCRIPTION HISTORY / INVOICES */}
       <Card className="border border-border">
