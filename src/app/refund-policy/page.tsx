@@ -5,12 +5,12 @@ export const metadata = {
   title: 'Refund and Cancellation Policy | CURAKIN HealthTech',
 }
 
-const EFFECTIVE_DATE = '[ADD EFFECTIVE DATE]'
+const EFFECTIVE_DATE = '1 November 2026'
 
 const CONTACT = {
-  email: '[ADD SUPPORT EMAIL]',
-  phone: '[ADD SUPPORT PHONE]',
-  address: '[ADD REGISTERED ADDRESS]',
+  email: 'curakinhealth@gmail.com',
+  phone: '+91 78996 75747',
+  address: 'T-5-247, R.T.P.S Colony, Shaktinagar, Raichur, Karnataka, India',
 }
 
 const FULL_REFUND_DAYS = 7
@@ -29,7 +29,7 @@ const SECTIONS: Section[] = [
   {
     title: '1. Free trial',
     paragraphs: [
-      `Every new clinic gets a ${TRIAL_DAYS}-day free trial. No payment details are needed to start. If you do not buy a plan before the trial ends, your account becomes view-only: you can still see your records, but you cannot create or change them.`,
+      `Every new clinic gets a ${TRIAL_DAYS}-day free trial. No payment details are needed to start. If you do not buy a plan before the trial ends, your account becomes view-only: you can still see your records, but you cannot create new records.`,
     ],
   },
   {
@@ -43,7 +43,7 @@ const SECTIONS: Section[] = [
     title: '3. Cancellation',
     paragraphs: [
       'Because plans do not renew automatically, there is nothing to cancel. Your plan stays active until the end of the term you paid for.',
-      `After your plan ends, you have a ${GRACE_PERIOD_DAYS}-day grace period with full access. After that your account becomes view-only until you renew. To close your account completely, email ${CONTACT.email}. How we keep and delete your data is described in our Terms of Service and Privacy Policy.`,
+      `After your plan ends, you have a ${GRACE_PERIOD_DAYS}-day grace period with full access. After that your account becomes view-only until you renew: you can still see and edit existing records, but you cannot create new ones. To close your account completely, email ${CONTACT.email}. How we keep and delete your data is described in our Terms of Service and Privacy Policy.`,
     ],
   },
   {
@@ -56,7 +56,7 @@ const SECTIONS: Section[] = [
       `From day ${FULL_REFUND_DAYS + 1} to day ${PARTIAL_REFUND_DAYS} after payment: refund of ${PARTIAL_REFUND_PERCENT}% of the amount you paid.`,
       `After ${PARTIAL_REFUND_DAYS} days: no refund. We do not refund the unused part of a term. This applies to 1, 3 and 5-year plans.`,
       'If we charged you the wrong amount, charged you twice for the same purchase, or a failure on our side stopped you from using the service and we could not fix it within a reasonable time, we will refund the affected amount in full, whenever it is reported.',
-      'When a refund is approved, the plan it relates to ends immediately and your clinic account becomes view-only.',
+      'When a refund is approved, the plan it relates to ends immediately and your clinic account becomes view-only (you can still see and edit existing records but cannot create new ones).',
     ],
   },
   {
@@ -122,9 +122,15 @@ export default function RefundPolicyPage() {
         </section>
       ))}
 
-      <footer className="border-t pt-6 text-sm text-muted-foreground">
+      <footer className="flex flex-wrap gap-4 border-t pt-6 text-sm text-muted-foreground">
         <Link href="/pricing" className="underline underline-offset-4">
-          Back to pricing
+          Pricing
+        </Link>
+        <Link href="/terms" className="underline underline-offset-4">
+          Terms of Service
+        </Link>
+        <Link href="/privacy" className="underline underline-offset-4">
+          Privacy Policy
         </Link>
       </footer>
     </main>
