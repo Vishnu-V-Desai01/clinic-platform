@@ -165,9 +165,15 @@ export default function PricingPage() {
             : 'Prices are exclusive of GST, which is added at checkout.'}{' '}
           Plans are paid once for the chosen term and do not renew automatically.
         </p>
-        <p>
+                <p className="flex flex-wrap justify-center gap-4">
           <Link href="/refund-policy" className="underline underline-offset-4">
             Refund and cancellation policy
+          </Link>
+          <Link href="/terms" className="underline underline-offset-4">
+            Terms of Service
+          </Link>
+          <Link href="/privacy" className="underline underline-offset-4">
+            Privacy Policy
           </Link>
         </p>
         <Link

@@ -9,7 +9,7 @@
 // file must be updated together, and TOS_VERSION bumped so any future
 // re-consent logic can tell who accepted which version.
 
-export const TOS_VERSION = '1.0'
+export const TOS_VERSION = '1.1'
 
 export type LegalSection = {
   heading: string
@@ -35,6 +35,7 @@ export const TERMS_OF_SERVICE_SECTIONS: LegalSection[] = [
     heading: '2. Subscription Plans and Pricing',
     paragraphs: [
       'CURAKIN offers flat-fee annual pricing tiers, differentiated by permitted doctor headcount only: Solo (\u20B914,000/year, 1 doctor), Clinic (\u20B928,000/year, up to 4 doctors), Group (\u20B960,000/year, up to 10 doctors), and Enterprise (custom quote, 10+ doctors). Every tier includes the full feature set; there is no feature-based gating between tiers. Staff seats are unlimited on every tier.',
+      'Solo and Clinic clinics may buy up to 2 additional doctor seats, at \u20B96,000 per seat per year on Solo and \u20B97,000 per seat per year on Clinic. Seats bought together with a plan follow the same Subscription Term and prepayment discount as the plan. Seats bought during a term are charged for the time remaining in that term. Additional seats end when the Subscription Term they were bought for ends. The Group tier does not offer additional seats; a Clinic needing more than 10 doctors should contact CURAKIN for an Enterprise quote.',
       'Multi-year prepayment discounts are available: 10% off the total for a 3-year term, 20% off for a 5-year term.',
       'CURAKIN is not currently registered for GST. Prices stated are therefore final, with no additional tax applied. This may change with notice if CURAKIN becomes GST-registered, affecting future invoices only.',
     ],
@@ -49,9 +50,9 @@ export const TERMS_OF_SERVICE_SECTIONS: LegalSection[] = [
     heading: '4. Payment Terms',
     bullets: [
       'All fees are payable upfront, in full, for the entire selected Subscription Term.',
-      'All fees are strictly non-refundable, regardless of the reason, except where required by law.',
-      'Once purchased, a Subscription Term cannot be shortened or cancelled prior to its natural expiry.',
-      'A Clinic exceeding its tier\u2019s doctor-seat limit must upgrade to a higher tier; there is no per-seat surcharge pricing.',
+      'Fees are refundable only as set out in the Refund and Cancellation Policy published at /refund-policy: a full refund within 7 days of payment, a 50% refund from day 8 to day 30, and no refund after 30 days. Fees charged in error, charged twice, or lost to a failure on our side are refunded in full. Nothing in this clause limits any refund right the Clinic has under applicable law.',
+      'Apart from the refund rights above, a Subscription Term cannot be shortened or cancelled before its natural expiry.',
+      'A Clinic exceeding its tier\u2019s doctor-seat limit must either buy additional seats where its tier allows them (see Section 2) or upgrade to a higher tier.',
     ],
   },
   {
@@ -65,7 +66,7 @@ export const TERMS_OF_SERVICE_SECTIONS: LegalSection[] = [
     heading: '6. Termination',
     paragraphs: [
       'CURAKIN may suspend or terminate an account for non-payment beyond the grace period, abuse or misuse of the Services, unlawful use, or breach of these Terms. Upon termination, CURAKIN will make existing patient records available for export via email or generated PDF, to enable continuity of patient care.',
-      'The Clinic may not unilaterally cancel or shorten an active Subscription Term prior to its scheduled expiry.',
+      'Apart from the refund rights in the Refund and Cancellation Policy, the Clinic may not unilaterally cancel or shorten an active Subscription Term prior to its scheduled expiry.',
     ],
   },
   {
