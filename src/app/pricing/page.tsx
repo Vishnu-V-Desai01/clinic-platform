@@ -51,7 +51,7 @@ const FEATURES = [
   'Unlimited staff accounts',
 ]
 
-const CONTACT_EMAIL = '[ADD SALES EMAIL]'
+const CONTACT_EMAIL = 'curakinhealth@gmail.com'
 
 export default function PricingPage() {
   return (
@@ -165,11 +165,24 @@ export default function PricingPage() {
             : 'Prices are exclusive of GST, which is added at checkout.'}{' '}
           Plans are paid once for the chosen term and do not renew automatically.
         </p>
-        <p>
+                <p className="flex flex-wrap justify-center gap-4">
           <Link href="/refund-policy" className="underline underline-offset-4">
             Refund and cancellation policy
           </Link>
+          <Link href="/terms" className="underline underline-offset-4">
+            Terms of Service
+          </Link>
+          <Link href="/privacy" className="underline underline-offset-4">
+            Privacy Policy
+          </Link>
         </p>
+                <address className="not-italic space-y-1">
+          <p>CURAKIN HealthTech</p>
+          <p>T-5-247, R.T.P.S Colony, Shaktinagar, Raichur, Karnataka, India</p>
+          <p>
+            curakinhealth@gmail.com | +91 78996 75747
+          </p>
+        </address>
         <Link
           href="/sign-up"
           className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground hover:bg-primary/90"
