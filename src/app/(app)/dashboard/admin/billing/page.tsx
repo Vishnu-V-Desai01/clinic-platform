@@ -2,16 +2,11 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { currentUser } from '@clerk/nextjs/server'
 import AdminBillingSettings from '@/features/billing/components/AdminBillingSettings'
 import { redirect } from 'next/navigation'
+import type { SubscriptionTier, SubscriptionTerm } from '@/features/billing/types'
 
 export const dynamic = 'force-dynamic'
 
-export const metadata = {
-  title: 'Billing & Subscriptions',
-  description: 'Manage your subscription, view invoices, and update billing details.',
-}
-
 export default async function BillingPage() {
-  // Get current user from Clerk
   const user = await currentUser()
 
   if (!user) {
@@ -20,7 +15,6 @@ export default async function BillingPage() {
 
   const supabase = createServerSupabaseClient()
 
-  // Get user's profile and clinic
   const { data: profile } = await supabase
     .from('profiles')
     .select('clinic_id')
@@ -31,7 +25,6 @@ export default async function BillingPage() {
     redirect('/onboarding')
   }
 
-  // Get clinic subscription data
   const { data: clinic } = await supabase
     .from('clinics')
     .select(
@@ -44,13 +37,28 @@ export default async function BillingPage() {
     redirect('/onboarding')
   }
 
-  // Get invoices
-  const { data: invoices } = await supabase
+  // invoices stores the charged amount in total_paise (subtotal + any GST)
+  const { data: invoices, error: invoicesError } = await supabase
     .from('invoices')
-    .select('id, issued_at, description, amount_paise, status')
+    .select('id, issued_at, description, total_paise, status')
     .eq('clinic_id', profile.clinic_id)
     .order('issued_at', { ascending: false })
     .limit(10)
+
+  if (invoicesError) {
+    console.error('[BillingPage] invoices query failed:', invoicesError)
+  }
+
+  const { count: doctorCount } = await supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('clinic_id', profile.clinic_id)
+    .eq('role', 'doctor')
+    .in('status', ['active', 'suspended'])
+
+  const { data: activeAddonSeats } = await supabase.rpc('get_active_addon_seats', {
+    p_clinic_id: profile.clinic_id,
+  })
 
   return (
     <div className="space-y-6 p-6">
@@ -65,8 +73,8 @@ export default async function BillingPage() {
 
       <AdminBillingSettings
         subscription={{
-          tier: (clinic.subscription_tier || 'clinic') as any,
-          term: (clinic.subscription_term || '1yr') as any,
+          tier: (clinic.subscription_tier || 'clinic') as SubscriptionTier,
+          term: (clinic.subscription_term || '1yr') as SubscriptionTerm,
           status: (clinic.subscription_status || 'trialing') as any,
           trialEndsAt: clinic.trial_ends_at,
           renewsAt: clinic.current_period_end,
@@ -77,10 +85,12 @@ export default async function BillingPage() {
             id: inv.id,
             date: inv.issued_at,
             description: inv.description || 'Subscription payment',
-            amountPaise: inv.amount_paise,
+            amountPaise: inv.total_paise,
             status: 'paid' as const,
           })) || []
         }
+        currentDoctorCount={doctorCount ?? 0}
+        activeAddonSeats={activeAddonSeats ?? 0}
       />
     </div>
   )
