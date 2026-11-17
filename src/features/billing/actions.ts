@@ -107,18 +107,7 @@ export async function createCheckoutOrderAction(
     }
 
        const addonPaise = computeSeatAddonPriceForNewTerm(quote.tier, term, normalizedAddonSeats)
-    const computedTotalPaise = quote.totalPaise + addonPaise
-
-    // TEMPORARY smoke-test override. Applies only to the one clinic named in
-    // BILLING_TEST_PRICE_CLINIC_ID, only when it lowers the price, and only
-    // while both env vars are set. REMOVE this block after the live test.
-    const testPaise = Number(process.env.BILLING_TEST_PRICE_PAISE)
-    const useTestPrice =
-      process.env.BILLING_TEST_PRICE_CLINIC_ID === admin.clinic_id &&
-      Number.isInteger(testPaise) &&
-      testPaise >= 100 &&
-      testPaise < computedTotalPaise
-    const totalPaise = useTestPrice ? testPaise : computedTotalPaise
+    const totalPaise = quote.totalPaise + addonPaise
 
     const order = await razorpay.orders.create({
       amount: totalPaise,
@@ -138,7 +127,7 @@ export async function createCheckoutOrderAction(
         tier: quote.tier,
         term: quote.term,
         status: 'pending',
-               amount_paise: useTestPrice ? testPaise : quote.totalPaise,
+                  amount_paise: quote.totalPaise,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
