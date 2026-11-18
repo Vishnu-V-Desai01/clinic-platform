@@ -3,6 +3,7 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { getOrCreateProfile } from '@/lib/supabase/profile'
+import { checkClinicCanCreate } from '@/features/billing/guard'
 import {
   newEncounterSchema,
   addDiagnosisSchema,
@@ -142,6 +143,8 @@ export async function getEncounterWithDetails(
 // Phase 1: treatments added as a fifth bulk-insert step, same
 // pattern as diagnoses/observations/prescriptions (log + warning on
 // failure, never fails the whole encounter save).
+//
+// Billing: an expired clinic cannot create new encounters.
 // ---------------------------------------------------------------
 export async function createEncounter(
   patientId: string,
@@ -154,6 +157,10 @@ export async function createEncounter(
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
     if (profile.role !== 'doctor') return { error: 'Only doctors can create encounters' }
+    if (!profile.clinic_id) return { error: 'Your account is not associated with a clinic' }
+
+    const guard = await checkClinicCanCreate(profile.clinic_id, 'createEncounter')
+    if (!guard.allowed) return { error: guard.error }
 
     const parsed = newEncounterSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }
@@ -316,6 +323,10 @@ export async function addDiagnosis(
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
     if (profile.role !== 'doctor') return { error: 'Only doctors can add diagnoses' }
+    if (!profile.clinic_id) return { error: 'Your account is not associated with a clinic' }
+
+    const guard = await checkClinicCanCreate(profile.clinic_id, 'addDiagnosis')
+    if (!guard.allowed) return { error: guard.error }
 
     const parsed = addDiagnosisSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }
@@ -358,6 +369,10 @@ export async function addObservation(
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
     if (profile.role !== 'doctor') return { error: 'Only doctors can add observations' }
+    if (!profile.clinic_id) return { error: 'Your account is not associated with a clinic' }
+
+    const guard = await checkClinicCanCreate(profile.clinic_id, 'addObservation')
+    if (!guard.allowed) return { error: guard.error }
 
     const parsed = addObservationSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }
@@ -400,6 +415,10 @@ export async function addPrescription(
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
     if (profile.role !== 'doctor') return { error: 'Only doctors can add prescriptions' }
+    if (!profile.clinic_id) return { error: 'Your account is not associated with a clinic' }
+
+    const guard = await checkClinicCanCreate(profile.clinic_id, 'addPrescription')
+    if (!guard.allowed) return { error: guard.error }
 
     const parsed = addPrescriptionSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }
@@ -442,6 +461,10 @@ export async function addTestResult(
     const profile = await getOrCreateProfile()
     if (!profile) return { error: 'Unauthorized' }
     if (!['doctor', 'staff'].includes(profile.role)) return { error: 'Unauthorized' }
+    if (!profile.clinic_id) return { error: 'Your account is not associated with a clinic' }
+
+    const guard = await checkClinicCanCreate(profile.clinic_id, 'addTestResult')
+    if (!guard.allowed) return { error: guard.error }
 
     const parsed = addTestResultSchema.safeParse(rawData)
     if (!parsed.success) return { error: parsed.error.issues[0].message }

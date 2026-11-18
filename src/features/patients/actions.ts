@@ -1,5 +1,6 @@
 // src/features/patients/actions.ts
 "use server"
+import { checkClinicCanCreate } from "@/features/billing/guard"
 import { after } from "next/server"
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
@@ -134,6 +135,11 @@ export async function createPatient(raw: unknown): Promise<Result<PatientRecord>
     if (!profile.clinic_id) {
       return { success: false, error: "Your account is not associated with a clinic." }
     }
+
+    // Billing: an expired clinic cannot register new patients. Inert unless
+    // BILLING_ENFORCEMENT is 'log' or 'on'.
+    const guard = await checkClinicCanCreate(profile.clinic_id, "createPatient")
+    if (!guard.allowed) return { success: false, error: guard.error }
 
     // A doctor registering a patient can only ever assign that patient to
     // themselves — the client's value is ignored entirely for that role,

@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/supabase/profile'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { checkDoctorSeatAvailable } from '@/features/billing/seats'
 import { createInvitationSchema, type CreateInvitationInput } from './schema'
 import type { Invitation } from './types'
 
@@ -26,6 +27,15 @@ export async function createInvitation(
   }
 
   const { email, role, staffType } = parsed.data
+
+  // Billing: inviting a doctor needs a free doctor seat (current doctors plus
+  // pending doctor invitations against the plan limit). Inert unless
+  // BILLING_ENFORCEMENT is 'log' or 'on'.
+  if (role === 'doctor') {
+    const seat = await checkDoctorSeatAvailable(profile.clinic_id as string)
+    if (!seat.allowed) return { success: false, error: seat.error }
+  }
+
   const supabase = createServerSupabaseClient()
 
   const { data: emailStatus, error: statusError } = await supabase.rpc(
