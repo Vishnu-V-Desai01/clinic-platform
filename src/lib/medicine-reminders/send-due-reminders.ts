@@ -78,6 +78,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getMessageProvider } from '@/features/messaging/providers'
 import { hasActiveConsentService } from '@/features/consent/service'
+import { checkClinicCanCreate } from '@/features/billing/guard'
 
 // English-only, per Item 4's explicit design decision.
 const PRESCRIPTION_REMINDER_TEMPLATE_NAME = 'curakin_medicine_reminder_en'
@@ -200,6 +201,8 @@ export type SendDueRemindersResult = {
   sent: number
   failed: number
   consentBlocked: number
+  /** Doses skipped because the clinic subscription has expired. */
+  expiredBlocked?: number
   groupedMessageCount: number
   reminderRowCount: number
   currentTime: string
@@ -322,9 +325,25 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
   let   sent     = 0
   let   failed   = unattributedFailures
   let   consentBlocked = 0
+  let   expiredBlocked = 0
+  const clinicAllowedCache = new Map<string, boolean>()
   const errors: string[] = []
 
   for (const group of groups.values()) {
+    // Billing gate: an expired clinic sends no automated reminders. Checked
+    // before any row is claimed, so blocked rows are left untouched and
+    // resume if the clinic renews. Inert unless BILLING_ENFORCEMENT is on/log.
+    let clinicAllowed = clinicAllowedCache.get(group.clinicId)
+    if (clinicAllowed === undefined) {
+      const guard = await checkClinicCanCreate(group.clinicId, 'sendMedicineReminders')
+      clinicAllowed = guard.allowed
+      clinicAllowedCache.set(group.clinicId, clinicAllowed)
+    }
+    if (!clinicAllowed) {
+      expiredBlocked += group.rows.length
+      continue
+    }
+
     // DPDP gate: checked live, per group, BEFORE any row is claimed.
     // Both purposes are required — 'whatsapp_notifications' (master
     // switch) AND 'medication_reminders' (this message type's specific
@@ -455,6 +474,7 @@ export async function sendDueMedicineReminders(): Promise<SendDueRemindersResult
     sent,
     failed,
     consentBlocked,
+    expiredBlocked,
     groupedMessageCount: groups.size,
     reminderRowCount: due.length,
     currentTime,

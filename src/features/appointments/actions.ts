@@ -18,28 +18,28 @@
 // to cancelled/completed, so stale "Ready to send" appointment messages
 // (confirmation + day-of reminder) don't linger after the visit is over
 // or scrubbed. Failures are logged but non-fatal to the status change
-// itself â€” the appointment transition is the important part; message
+// itself — the appointment transition is the important part; message
 // cleanup is best-effort, same pattern as receipt-message queuing
 // elsewhere in the codebase.
 //
 // Issue 5 follow-up (this chat): rescheduleAppointment now also suppresses
 // the stale appointment message (queued against the OLD date/time) and
-// queues a fresh one reflecting the new date/time â€” same
+// queues a fresh one reflecting the new date/time — same
 // suppressAppointmentMessages()/createAppointmentMessage() pair Issue 4
 // already established.
 //
 // KNOWN GAP (flagged, not fixed in this pass): updateAppointmentStatus
-// only checks requireRole('doctor') and clinic_id â€” it does NOT verify
+// only checks requireRole('doctor') and clinic_id — it does NOT verify
 // the calling doctor is the one assigned to this specific appointment
 // (existing.doctor_id). Any doctor in the clinic can currently mark any
 // other doctor's appointment complete. suppressAppointmentMessages()
 // works correctly regardless, since it goes through a SECURITY DEFINER
-// RPC that doesn't depend on the caller owning the appointment â€” but the
+// RPC that doesn't depend on the caller owning the appointment — but the
 // underlying status-change permission gap itself is a separate issue.
 //
 // Item 6 additions: getAppointmentById now also looks up, for a completed
 // appointment only, whether its linked encounter has any active
-// prescriptions â€” feeds the "Send Prescription" button on the appointment
+// prescriptions — feeds the "Send Prescription" button on the appointment
 // detail page (see AppointmentPrescriptionSummary in ./types).
 // sendPrescriptionMessage is the new server action that button calls:
 // re-verifies the appointment is completed and re-derives the encounterId
@@ -67,6 +67,7 @@ import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { requireRole } from "@/lib/supabase/profile"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { checkClinicCanCreate } from "@/features/billing/guard"
 import {
   createAppointmentMessage,
   suppressAppointmentMessages,
@@ -296,11 +297,11 @@ export async function listAppointments(filters?: {
         id:                    r.id,
         clinic_id:             clinicId,
         patient_id:            r.patient_id,
-        patient_first_name:    r.patients?.first_name  ?? "â€”",
-        patient_last_name:     r.patients?.last_name   ?? "â€”",
+        patient_first_name:    r.patients?.first_name  ?? "—",
+        patient_last_name:     r.patients?.last_name   ?? "—",
         patient_mrn:           r.patients?.patient_id_number ?? null,
         doctor_id:             r.doctor_id,
-        doctor_full_name:      r.profiles?.full_name   ?? "â€”",
+        doctor_full_name:      r.profiles?.full_name   ?? "—",
         doctor_specialization: r.profiles?.specialization ?? null,
         appointment_date:      r.appointment_date,
         duration_minutes:      r.duration_minutes,
@@ -361,11 +362,11 @@ export async function getAppointmentById(
       id:                    r.id,
       clinic_id:             r.clinic_id,
       patient_id:            r.patient_id,
-      patient_first_name:    r.patients?.first_name  ?? "â€”",
-      patient_last_name:     r.patients?.last_name   ?? "â€”",
+      patient_first_name:    r.patients?.first_name  ?? "—",
+      patient_last_name:     r.patients?.last_name   ?? "—",
       patient_mrn:           r.patients?.patient_id_number ?? null,
       doctor_id:             r.doctor_id,
-      doctor_full_name:      r.profiles?.full_name   ?? "â€”",
+      doctor_full_name:      r.profiles?.full_name   ?? "—",
       doctor_specialization: r.profiles?.specialization ?? null,
       appointment_date:      r.appointment_date,
       duration_minutes:      r.duration_minutes,
@@ -379,10 +380,10 @@ export async function getAppointmentById(
     }
 
     // Item 6: only completed appointments can have a "Send Prescription"
-    // button â€” look up the linked encounter and whether it has any
+    // button — look up the linked encounter and whether it has any
     // active (non-deleted, non-stopped) prescriptions. A missing
     // encounter for a completed appointment is treated as "no summary"
-    // rather than an error â€” the UI just won't show the button.
+    // rather than an error — the UI just won't show the button.
     let prescriptionSummary: AppointmentPrescriptionSummary | undefined
 
     if (ctx.status === "completed") {
@@ -428,6 +429,13 @@ export async function createAppointment(
     }
 
     const data: CreateAppointmentData = parsed.data
+
+    // Billing: an expired clinic cannot book new appointments. Inert unless
+    // BILLING_ENFORCEMENT is log/on. Fails open on any lookup problem.
+    if (profile.clinic_id) {
+      const guard = await checkClinicCanCreate(profile.clinic_id, "createAppointment")
+      if (!guard.allowed) return { success: false, error: guard.error }
+    }
     const supabase    = createServerSupabaseClient()
     const isoDateTime = combineDateAndTime(data.appointmentDate, data.appointmentTime)
 
@@ -530,10 +538,10 @@ export async function rescheduleAppointment(
     // message (queued against the OLD date/time) is now stale and would
     // either send with wrong info or sit uselessly in the queue. Suppress
     // any still-pending appointment message for this appointment, then
-    // queue a fresh one â€” createAppointmentMessage re-reads the
+    // queue a fresh one — createAppointmentMessage re-reads the
     // appointment row (now updated) and computes placeholders + a new
     // scheduled_send_time from the NEW date/time. Reuses the existing
-    // appointment-message template/wording per the confirmed design â€” no
+    // appointment-message template/wording per the confirmed design — no
     // new "rescheduled" template. Best-effort/non-fatal: the reschedule
     // itself already succeeded and committed above.
     //
@@ -616,7 +624,7 @@ export async function cancelAppointment(
     if (error) throw error
 
     // Issue 4: suppress any still-pending confirmation/day-of reminder
-    // messages for this appointment now that it's cancelled. Best-effort â€”
+    // messages for this appointment now that it's cancelled. Best-effort —
     // the cancellation itself already succeeded and committed above; a
     // suppression failure shouldn't be reported as if the cancel failed.
     try {
@@ -679,7 +687,7 @@ export async function updateAppointmentStatus(
     // Issue 4: suppress any still-pending confirmation/day-of reminder
     // messages when the appointment is marked completed (or, via this
     // same function, any other terminal-ish status change). Only actually
-    // removes rows when they exist â€” a no-op for statuses like
+    // removes rows when they exist — a no-op for statuses like
     // 'in_progress' that don't correspond to "the visit is over."
     // Best-effort: the status update already committed above.
     if (data.status === "completed") {
@@ -704,7 +712,7 @@ export async function updateAppointmentStatus(
 // completed and belongs to this clinic, re-derives the encounterId
 // server-side (never trusts a client-supplied one), then delegates to
 // createPrescriptionMessage + sendMessage. Runs both steps together since
-// the UI's confirm dialog IS the "are you sure" step â€” there's no
+// the UI's confirm dialog IS the "are you sure" step — there's no
 // separate "queue now, send later" flow for this action the way receipts
 // have (receipts auto-send OR sit in Messages for staff to send
 // manually; prescriptions are always an explicit, immediate send).
@@ -763,14 +771,14 @@ export async function sendPrescriptionMessage(
 // ============================================================================
 // viewPrescriptionDocument (Item 5 follow-up)
 //
-// Guarantees a clinic-side, unalterable copy of the prescription exists â€”
+// Guarantees a clinic-side, unalterable copy of the prescription exists —
 // separate from whether the doctor has ever clicked "Send Prescription" to
 // WhatsApp the patient a link. Calling this always ensures a stored
 // document row exists (generateAndStorePrescriptionDocument is idempotent
-// â€” a second call for the same encounter returns the existing row rather
+// — a second call for the same encounter returns the existing row rather
 // than duplicating), then returns a short-lived signed URL so the doctor
 // can view/print it. The storage bucket is private, so a signed URL (not
-// a permanent public link) is required â€” same pattern already used for
+// a permanent public link) is required — same pattern already used for
 // the patient-facing download link, just scoped to staff and expiring
 // much sooner since this is opened immediately, not saved for later.
 // ============================================================================
@@ -817,7 +825,7 @@ export async function viewPrescriptionDocument(
 
     const { data: signed, error: signError } = await supabase.storage
       .from("clinic-documents")
-      .createSignedUrl(doc.file_path, 300) // 5 minutes â€” opened immediately, not saved for later
+      .createSignedUrl(doc.file_path, 300) // 5 minutes — opened immediately, not saved for later
 
     if (signError || !signed) {
       console.error("[viewPrescriptionDocument] Signed URL creation failed:", signError)

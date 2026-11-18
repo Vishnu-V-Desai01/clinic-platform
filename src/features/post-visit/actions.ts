@@ -75,6 +75,7 @@
 import { revalidatePath } from 'next/cache'
 import { getOrCreateProfile } from '@/lib/supabase/profile'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { checkClinicCanCreate } from '@/features/billing/guard'
 // NOTE: generateAndStorePaymentDocuments / createReceiptMessage are no
 // longer called from this file — per the Issue 5 receipt-timing change,
 // receipt documents + the WhatsApp receipt message now only fire from
@@ -696,6 +697,14 @@ export async function completeVisit(
     }
 
     const patientId = data.patientId
+
+    // Billing: an expired clinic cannot complete a visit for the first time.
+    // Re-editing an already-completed visit stays open (Terms, Section 5).
+    // Inert unless BILLING_ENFORCEMENT is log/on.
+    if (appointment.status !== 'completed') {
+      const guard = await checkClinicCanCreate(clinicId, 'completeVisit')
+      if (!guard.allowed) return { success: false, error: guard.error }
+    }
 
     // Existing encounter for this appointment — presence = edit mode.
     const { data: existingEncounter } = await supabase
